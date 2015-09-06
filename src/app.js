@@ -17,7 +17,7 @@ module.exports.ConsoleLogger = logger.ConsoleLogger;
 module.exports.MySqlDatabaseStore = require('./mysql.js');
 module.exports.RedisSessionStore = require('./redis.js');
 module.exports.CryptoPasswordHash = require('./crypto.js');
-console.log(process.cwd())
+
 var app = null;
 var _r = {
   promise: null,
@@ -44,11 +44,6 @@ function onReady(err) {
   _r.resolve = null;
   _r.promise = null;
 }
-
-var _midwares_proto = {
-  roles: {},
-  services: {}
-};
 
 module.exports.app = function factory(config) {
   if (app) {
