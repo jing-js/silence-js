@@ -1,0 +1,31 @@
+{
+  "name": "silence-js",
+  "version": "0.0.1",
+  "description": "model-controller-json framework based on KOA",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jing-js/silence.js.git"
+  },
+  "author": "Yuhang Ge",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/jing-js/silence.js/issues"
+  },
+  "homepage": "https://github.com/jing-js/silence.js#readme",
+  "dependencies": {
+    "arr-union": "~3.0.0",
+    "co-body": "~4.0.0",
+    "extend": "~3.0.0",
+    "formidable": "~1.0.17",
+    "hiredis": "~0.4.1",
+    "koa": "~1.0.0",
+    "mysql": "~2.9.0",
+    "redis": "~1.0.0",
+    "underscore": "~1.8.3",
+    "uuid": "~2.0.1"
+  }
+}
