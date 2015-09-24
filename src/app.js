@@ -61,6 +61,8 @@ module.exports.app = function factory(config) {
    * 而是每次请求来了后，再动态地添加 xxx 属性，会不会有性能的影响呢？我不知道……
    */
   app.context.sendAjax = sendAjax;
+  app.context.sendSuccess = sendSuccess;
+  app.context.sendError = sendError;
   app.context.logger = _logger;
   app.logger = _logger;
 
@@ -163,6 +165,21 @@ function sendAjax(success, data) {
     success: success,
     data: data
   });
+}
+
+function sendSuccess(data) {
+  this.sendAjax(true, data);
+}
+
+function sendError(code, message) {
+  if (_.isObject(code)) {
+    this.sendAjax(false, code);
+  } else {
+    this.sendAjax(false, {
+      code: code,
+      message: message
+    });
+  }
 }
 
 function loopLoad(app, namespace) {

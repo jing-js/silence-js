@@ -74,6 +74,18 @@ class RedisSessionStore extends BaseSessionStore {
       });
     });
   }
+  del(sessionId) {
+    var redis = this.redisClient;
+    return new Promise(function(resolve, reject) {
+      redis.del(sessionId, err => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(true);
+        }
+      })
+    });
+  }
   close() {
     this.redisClient.end();
   }

@@ -65,6 +65,13 @@ class SessionUser {
     }
     return su;
   }
+  *logout() {
+    if (!this.remember) {
+      yield this.sessionStore.del(this.sessionId);
+    }
+    this.isLogin = false;
+    this.sessionId = '';
+  }
 }
 
 function gSessionId() {
