@@ -1,12 +1,12 @@
 'use strict';
 
-var _ = require('underscore');
-var koa = require('koa');
-var session = require('./session.js');
-var route = require('./route.js');
-var path = require('path');
-var fs = require('fs');
-var logger = require('./logger.js');
+const _ = require('underscore');
+const koa = require('koa');
+const session = require('./session.js');
+const route = require('./route.js');
+const path = require('path');
+const fs = require('fs');
+const logger = require('./logger.js');
 
 module.exports.PromisedObserver = require('./observer.js');
 module.exports.BaseLogger = logger.BaseLogger;
@@ -17,9 +17,11 @@ module.exports.ConsoleLogger = logger.ConsoleLogger;
 module.exports.MySqlDatabaseStore = require('./mysql.js');
 module.exports.RedisSessionStore = require('./redis.js');
 module.exports.CryptoPasswordHash = require('./crypto.js');
+module.exports.BasePasswordHash = require('./hash.js');
 
-var app = null;
-var _r = {
+let app = null;
+let _appPath = process.cwd();
+const _r = {
   promise: null,
   resolve: null,
   reject: null,
@@ -52,15 +54,18 @@ module.exports.app = function factory(config) {
   }
 
   app = koa();
-
+  if (config.app && config.app.path) {
+    _appPath = config.app.path;
+  }
   let _logger = new config.logger['class'](config.logger); //initialize logger
-
   /*
    * app.context.xxx 的赋值，可以使得在controller中 this.xxx 就能取到。
    * 如果说v8引擎在生成koa的上下文实例时，没有为 xxx 分配空间，
    * 而是每次请求来了后，再动态地添加 xxx 属性，会不会有性能的影响呢？我不知道……
    */
   app.context.sendAjax = sendAjax;
+  app.context.sendSuccess = sendSuccess;
+  app.context.sendError = sendError;
   app.context.logger = _logger;
   app.logger = _logger;
 
@@ -100,7 +105,7 @@ module.exports.app = function factory(config) {
     /*
      * 遍历models目录下的Model，初始化（包括创建表）
      */
-    let root = process.cwd();
+    let root = _appPath;
     let arr = [];
     function loop(dir) {
       fs.readdirSync(dir).forEach(file => {
@@ -165,8 +170,15 @@ function sendAjax(success, data) {
   });
 }
 
+function sendSuccess(data) {
+  this.sendAjax(true, data || 'success');
+}
+
+function sendError(err) {
+  this.sendAjax(false, err);
+}
+
 function loopLoad(app, namespace) {
-  let root = process.cwd();
   let ns = app[namespace] || (app[namespace] = {});
   let nsp = [namespace];
   function rd(ns_path, namespace, dir) {
@@ -181,7 +193,7 @@ function loopLoad(app, namespace) {
       }
     });
   }
-  rd(nsp, ns, path.join(root, namespace));
+  rd(nsp, ns, path.join(_appPath, namespace));
 }
 
 /*
