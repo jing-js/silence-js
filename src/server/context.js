@@ -27,6 +27,16 @@ class SilenceContext {
     this._code = 200;
     this._isSent = false;
     this._body = null;
+    this._ip = null;
+  }
+  get method() {
+    return this.originRequest.method;
+  }
+  get ip() {
+    if (this._ip === null) {
+      this._ip = util.getClientIp(this);
+    }
+    return this._ip;
   }
   get headers() {
     return this.originRequest.headers;

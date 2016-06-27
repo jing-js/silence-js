@@ -2,59 +2,164 @@
 
 const util = require('../util/util');
 
-class Handler {
-  constructor(handler, middlewares, method) {
+const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'HEAD'];
+const ANY = 0xffff;
+
+class AbstractHandler {
+  constructor(handler, middlewares) {
     this.fn = handler;
     this.middlewares = middlewares;
-    this.method = method;
-    this.params = [];
   }
 }
 
-class RouteNode {
-  constructor(val) {
-    this.val = val;
-    this.next = [];
+class Handler extends AbstractHandler {
+  constructor(handler, middlewares, method) {
+    super(handler, middlewares);
+    this.method = method;
+  }
+}
+
+class RuntimeHandler extends AbstractHandler {
+  constructor(ah, params) {
+    super(ah.fn, ah.middlewares);
+    this.params = params;
+  }
+}
+
+
+class Route {
+  constructor(code) {
+    this.code = code;
+    this.next = null;
     this.handler = null;
   }
-  findNext(val) {
+  findNext(code) {
+    if (this.next === null) {
+      return null;
+    }
     for(let i = 0; i < this.next.length; i++) {
-      if (this.next[i].val === val) {
+      if (this.next[i].code > code) {
+        return null;
+      } else if (this.next[i].code === code) {
         return this.next[i];
       }
     }
     return null;
   }
-  match(url, idx) {
-    let end = url.length;
-    let len = this.val.length;
-    let i;
-    for(i = 0; i < len; i++) {
-      if (url.charCodeAt(idx) !== this.val.charCodeAt(i)) {
-        return null;
+  addNext(node) {
+    if (this.next === null) {
+      this.next = [node];
+      return;
+    }
+    for(let i = 0; i < this.next.length; i++) {
+      if (this.next[i].code >= node.code) {
+        this.next.splice(i, 0, node);
+        return;
       }
-      idx++;
-      if (idx === end) {
-        if (i === len - 1 && this.handler !== null) {
-          return this.handler;
+    }
+    this.next.push(node);
+  }
+  match(method, url) {
+    let p = this;
+    let params = [];
+    let i = 0;
+    let __pre_i = null;
+    let end = url.length - 1;
+    if (end > 1 && url.charCodeAt(end) === 47) {
+      end--; // ignore last '/'
+    }
+    while(true) {
+      if (p.code === ANY) {
+        let pi = i;
+        while(i <= end && url.charCodeAt(i) !== 47) {
+          i++;
+        }
+        __pre_i = null;
+        params.push(url.substring(pi, i));
+      } else {
+        let c = url.charCodeAt(i);
+        if (c !== p.code) {
+          if (__pre_i === null) {
+            return null;
+          } else {
+            p = __pre_i.p;
+            i = __pre_i.i;
+            // console.log('try last state')
+            continue; // continue while, return to last state
+          }
+        } else if (c === 47) {
+          __pre_i = null;
+        }
+        i++;
+      }
+
+      if (i > end) {
+        // console.log(p.handler);
+        if (p.handler === null || !p.handler.has(method)) {
+          if (__pre_i === null) {
+            return null;
+          } else {
+            p = __pre_i.p;
+            i = __pre_i.i;
+            // console.log('try last state');
+            continue; // continue while, return to last state
+          }
         } else {
+          break; // exit while
+        }
+      }
+      if (p.next === null) {
+        if (__pre_i === null) {
           return null;
+        } else {
+          p = __pre_i.p;
+          i = __pre_i.i;
+          // console.log('try last state')
+        }
+      } else if (p.next.length === 1) {
+        p = p.next[0];
+      } else {
+        let c = url.charCodeAt(i);
+        let found = null;
+        let k = 0;
+        for(;k < p.next.length; k++) {
+          let c2 = p.next[k].code;
+          if (c2 === c) {
+            found =  p.next[k];
+            break; // exit for
+          } else if (c2 > c) {
+            break;
+          }
+        }
+        k = p.next.length - 1;
+        if (p.next[k].code === ANY) {
+          if (found !== null) {
+            __pre_i = {
+              i: i,
+              p: p.next[k]
+            };
+            p = found;
+            // console.log('save state');
+          } else {
+            p = p.next[k];
+          }
+        } else {
+          if (found !== null) {
+            p = found;
+          } else {
+            if (__pre_i === null) {
+              return null;
+            } else {
+              p = __pre_i.p;
+              i = __pre_i.i;
+              // console.log('try last state')
+              // continue; // continue while, return to last state
+            }
+          }
         }
       }
     }
-
-    if (this.next.length === 0) {
-      return null;
-    }
-    let c = url.charCodeAt(idx);
-    for(i = 0; i < this.next.length; i++) {
-      let c2 = this.next[i].val.charCodeAt(0);
-      if (c < c2) {
-        return null;
-      } else if (c === c2 ) {
-        return this.next[i].match(url, idx);
-      }
-    }
+    return new RuntimeHandler(p.handler.get(method), params);
   }
 }
 
@@ -63,13 +168,10 @@ function concatUrl(url, sub) {
   if (newUrl[0] !== '/') {
     newUrl = '/' + newUrl;
   }
-  // if (newUrl[newUrl.length - 1] !== '/') {
-  //   newUrl = newUrl + '/';
-  // }
   return newUrl;
 }
 
-class Route {
+class RouteDefine {
   constructor(name, middlewares = [], parent = null) {
     this.name = name;
     this.url = concatUrl(parent? parent.url : '', name);
@@ -82,7 +184,7 @@ class Route {
     let handler = args[args.length - 1];
     let isStr = util.isString(args[0]);
     let middlewares = args.slice(isStr ? 1 : 0, args.length - 1);
-    let newRoute = new Route(isStr ? args[0] : '', middlewares, this);
+    let newRoute = new RouteDefine(isStr ? args[0] : '', middlewares, this);
     newRoute.handler = new Handler(handler, newRoute.middlewares, method);
     this.children.push(newRoute);
     return this;
@@ -99,8 +201,12 @@ class Route {
   del(...args) {
     return this._route('DELETE', ...args);
   }
+  head(...args) {
+    return this._route('HEAD', ...args);
+  }
   all(...args) {
-    return this._route('ALL', ...args);
+    METHODS.forEach(med => this._route(med, ...args));
+    return this;
   }
   rest(name, ...args) {
     let controllers = args[args.length - 1];
@@ -116,7 +222,7 @@ class Route {
     let callback = args[args.length - 1];
     let isStr = util.isString(args[0]);
     let middlewares = args.slice(isStr ? 1 : 0, args.length - 1);
-    let group = new Route(isStr ? args[0] : '', middlewares, this);
+    let group = new RouteDefine(isStr ? args[0] : '', middlewares, this);
     callback(group);
     this.children.push(group);
     return this;
@@ -129,23 +235,49 @@ class Route {
   }
 }
 
-Route.buildRouteTree = function(route) {
+function buildTree(route, logger) {
 
-  let root = new RouteNode(0);
+  var root = new Route(0);
 
   function walk_route(route, idx) {
     if (route.handler) {
       let p = root;
-      for(let c = 0; c < route.url.length; c++) {
+      let url = route.url;
+      if (url.length > 1 && url[url.length - 1] === '/') {
+        url = url.substring(0, url.length - 1);
+      }
+
+      let end = url.length;
+      for(let c = 0; c < end; c++) {
         let code = route.url.charCodeAt(c);
+        if (code === 58) { // skip ':xxx' until '/'
+          while(c < end - 1 && code !== 47) {
+            c++;
+            code = url.charCodeAt(c);
+          }
+          if (code === 47) {
+            c--;
+          }
+          code = ANY;
+        }
         let pn = p.findNext(code);
         if (!pn) {
-          pn = new RouteNode(code);
-          p.next.push(pn);
+          pn = new Route(code);
+          p.addNext(pn);
         }
         p = pn;
       }
-      p.handler = route.handler;
+      if (!p.handler) {
+        p.handler = new Map();
+      }
+      // console.log(`${route.handler.method} ${route.handler.fn.name}`);
+      if (p.handler.has(route.handler.method)) {
+        logger.error(`Duplicate route define, METHOD ${route.handler.method}, URL ${url}. process exit`);
+        process.exit(-1);
+      } else {
+        logger.debug(`Add router ${route.handler.method} ${url}`);
+      }
+      p.handler.set(route.handler.method, new AbstractHandler(route.handler.fn, route.handler.middlewares));
     }
     for(let i = 0; i < route.children.length; i++) {
       walk_route(route.children[i], idx)
@@ -153,41 +285,39 @@ Route.buildRouteTree = function(route) {
   }
 
   walk_route(route, 0);
-  route.destroy(); // 回收内存
+  route.destroy();
 
-  let treeNode = new RouteNode('');
+  return root.next[0];
+}
 
-  function walk_tree(node, nextArr) {
-
-
-    let p = node;
-    let arr = [node];
-    while(p.next.length === 1 && p.handler === null) {
-      arr.push(p.next[0]);
-      p = p.next[0];
-    }
-
-    let newNode = new RouteNode(arr.map(n => String.fromCharCode(n.val)).join(''));
-    nextArr.push(newNode);
-
-    if (p.handler) {
-      newNode.handler = p.handler;
-    }
-
-    if (p.next.length >= 1) {
-      for(let i = 0; i < p.next.length; i++) {
-        walk_tree(p.next[i], newNode.next);
-      }
-      newNode.next.sort((a, b) => {
-        return a.val === b.val ? 0 : (a.val > b.val ? 1 : -1);
-      });
-    }
+class RouteManager extends RouteDefine {
+  constructor(logger) {
+    super('');
+    this.logger = logger;
+    this.tree = null;
   }
+  match(ctx) {
+    return this.tree.match(ctx.method, ctx.url.path, 0);
+  }
+  build() {
+    this.tree = buildTree(this, this.logger);
+    // console.log(this.tree);
+    // console.log(this.tree.match('GET', '/login'));
+  }
+}
 
-  walk_tree(root.next[0], treeNode.next);
+function printTree(tree) {
+  function loop(t, level) {
+    let prefix = new Array(level).fill(0).map(() => ' ').join('');
+    console.log(prefix + t.val);
+    if (t.handler) {
+      console.log(t.handler);
+    }
+    t.next.forEach(function (c) {
+      loop(c, level + 1);
+    });
+  }
+  loop(tree, 0)
+}
 
-  return treeNode.next[0];
-};
-
-
-module.exports = Route;
+module.exports = RouteManager;

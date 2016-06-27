@@ -1,7 +1,7 @@
 'use strict';
 
-const validators = require('./../util/validator.js');
-const _ = require('lodash');
+const validators = require('../util/validator.js');
+const util = require('../util/util');
 
 //todo support enum
 const typesMap = {

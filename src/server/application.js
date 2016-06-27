@@ -2,14 +2,37 @@
 
 const util = require('../util/util');
 const SilenceContext = require('./context');
-const uuid = require('uuid');
-const Route = require('./route');
+const crypto = require('crypto');
+const RouteManager = require('./route');
 const co = require('co');
 const DEFAULT_PORT = 80;
 const DEFAULT_HOST = '0.0.0.0';
 
 const http = require('http');
 
+function genSessionKey() {
+  return new Promise((resolve, reject) => {
+    let tries = 0;
+    function tryGen() {
+      crypto.randomBytes(24, (err, buf) => {
+        if (!err) {
+          resolve(buf.toString('base64')
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, ''));
+        } else {
+          if (tries < 3) {
+            tries++;
+            tryGen()
+          } else {
+            reject(err);
+          }
+        }
+      });
+    }
+    tryGen();
+  });
+}
 
 class SilenceApplication {
   constructor(config, logger, db, session, hasher, SessionUser) {
@@ -18,7 +41,7 @@ class SilenceApplication {
     this.db = db;
     this.session = session;
     this.hasher = hasher;
-    this._route = new Route('/');
+    this._route = new RouteManager(logger);
     this.SessionUser = SessionUser;
     this._sessionKey = config.session.key || 'SILENCE_SESSION';
 
@@ -27,14 +50,11 @@ class SilenceApplication {
       this.logger.error(err);
     });
   }
-  _getSessionKey() {
-    return uuid.v4();
-  }
   *_checkSessionUser(ctx) {
     let sid = ctx.cookie.get(this._sessionKey); //fetch cookie
     let ru;
     if (!sid) {
-      ctx.cookie.set(this._sessionKey, this._getSessionKey());
+      ctx.cookie.set(this._sessionKey, yield genSessionKey());
       return;
     }
     ru = yield ctx.session.get(sid);
@@ -51,9 +71,9 @@ class SilenceApplication {
       response.setHeader('Access-Control-Allow-Origin', this.cors);
     }
     let ctx = new SilenceContext(this, request, response);
-    let handler = this._route.match(ctx.url.path, 0);
-    if (!handler || (handler.method !== 'ALL' && handler.method !== request.method)) {
-      this.logger.warn(`${request.url} not found`);
+    let handler = this._route.match(ctx);
+    if (!handler) {
+      this.logger.warn(`(404) ${ctx.method} ${request.url} not found`);
       ctx.error(404);
       ctx.destroy();
       return;
@@ -69,18 +89,16 @@ class SilenceApplication {
         } else {
           fn.apply(ctx, handler.params);
         }
-        if (ctx.response.isSent) {
+        if (ctx.isSent) {
           return;
         }
       }
-      console.log(ctx._user);
       if (util.isGenerateFunction(handler.fn)) {
         return yield handler.fn.apply(ctx, handler.params);
       } else {
         return handler.fn.apply(ctx, handler.params);
       }
     }).then(res => {
-      console.log(res);
       if (!ctx.isSent) {
         if (!util.isUndefined(res)) {
           ctx.success(res);
@@ -97,27 +115,6 @@ class SilenceApplication {
       ctx.destroy();
     });
   }
-  __printRoute(route) {
-
-    function loop(p, level) {
-      console.log(new Array(level).fill(0).map(() => ' ').join('') + String.fromCharCode(p.val));
-      p.next.forEach(function (c) {
-        loop(c, level + 1);
-      });
-    }
-
-    loop(route, 0);
-  }
-  __printTree(tree) {
-    console.log(tree)
-    function loop(t, level) {
-      console.log(new Array(level).fill(0).map(() => ' ').join('') + t.val + (t.handler ? `[h:${t.handler.method} ${t.handler.fn.name}]` : ''));
-      t.next.forEach(function (c) {
-        loop(c, level + 1);
-      });
-    }
-    loop(tree, 0)
-  }
   listen(port = DEFAULT_PORT, host = DEFAULT_HOST) {
     if (util.isObject(port)) {
       host = port.host || DEFAULT_HOST;
@@ -130,7 +127,7 @@ class SilenceApplication {
           // nextTick 使得 listen 函数在路由定义之前调用,
           // 也仍然会在全部路由定义好之后才真正执行
           process.nextTick(() => {
-            this._route = Route.buildRouteTree(this._route);
+            this._route.build();
             res();
           });
         }),
@@ -164,19 +161,23 @@ class SilenceApplication {
     return this;
   }
   post(...args) {
-    this._route.get(...args);
+    this._route.post(...args);
     return this;
   }
   rest(...args) {
-    this._route.get(...args);
+    this._route.rest(...args);
     return this;
   }
   put(...args) {
-    this._route.get(...args);
+    this._route.put(...args);
     return this;
   }
   del(...args) {
     this._route.del(...args);
+    return this;
+  }
+  head(...args) {
+    this._route.head(...args);
     return this;
   }
   group(...args) {
