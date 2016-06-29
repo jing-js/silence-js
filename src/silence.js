@@ -6,7 +6,7 @@ silence.BaseLogger = require('./base/logger');
 silence.BaseModel = require('./base/model');
 silence.BaseSQLModel = BaseSQLModel;
 silence.BaseSessionStore = require('./base/session');
-silence.BaseDatabaseStore = require('./base/database');
+silence.BaseSQLDatabaseStore = require('./base/database');
 silence.BasePasswordHash = require('./base/hash');
 silence.SessionUser = require('./server/user');
 silence.util = require('./util/util');
@@ -19,7 +19,9 @@ function silence(config) {
   let hash = new config.hash['class'](config.hash);
   let sessionUserClass = config.session.user || silence.SessionUser;
 
-  BaseSQLModel.__initialize(db, logger);
+  // initialize BaseSQLModel
+  BaseSQLModel.__db = db;
+  BaseSQLModel.__logger = logger;
 
   return new SilenceApplication(config, logger, db, session, hash, sessionUserClass);
 }
