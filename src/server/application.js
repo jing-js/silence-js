@@ -10,29 +10,6 @@ const DEFAULT_HOST = '0.0.0.0';
 
 const http = require('http');
 
-function genSessionKey() {
-  return new Promise((resolve, reject) => {
-    let tries = 0;
-    function tryGen() {
-      crypto.randomBytes(24, (err, buf) => {
-        if (!err) {
-          resolve(buf.toString('base64')
-            .replace(/\+/g, '-')
-            .replace(/\//g, '_')
-            .replace(/=/g, ''));
-        } else {
-          if (tries < 3) {
-            tries++;
-            tryGen()
-          } else {
-            reject(err);
-          }
-        }
-      });
-    }
-    tryGen();
-  });
-}
 
 class SilenceApplication {
   constructor(config, logger, db, session, hasher, SessionUser) {
@@ -46,15 +23,16 @@ class SilenceApplication {
     this._sessionKey = config.session.key || 'SILENCE_SESSION';
 
     process.on('uncaughtException', err => {
+      console.log(err);
       this.logger.error('UNCAUGHT EXCEPTION');
       this.logger.error(err);
     });
   }
+
   *_checkSessionUser(ctx) {
     let sid = ctx.cookie.get(this._sessionKey); //fetch cookie
     let ru;
     if (!sid) {
-      ctx.cookie.set(this._sessionKey, yield genSessionKey());
       return;
     }
     ru = yield ctx.session.get(sid);
@@ -66,6 +44,7 @@ class SilenceApplication {
       ctx._user = user;
     }
   }
+
   handle(request, response) {
     if (this.cors) {
       response.setHeader('Access-Control-Allow-Origin', this.cors);
@@ -80,9 +59,9 @@ class SilenceApplication {
     }
 
     var app = this;
-    co(function* () {
+    co(function*() {
       yield app._checkSessionUser(ctx);
-      for(let i = 0; i < handler.middlewares.length; i++) {
+      for (let i = 0; i < handler.middlewares.length; i++) {
         let fn = handler.middlewares[i];
         if (util.isGenerateFunction(fn)) {
           yield fn.apply(ctx, handler.params);
@@ -113,24 +92,17 @@ class SilenceApplication {
       this.logger.error(err);
       ctx.error(500);
       ctx.destroy();
+    }).catch(err => {
+      this.logger.error(err);
+      ctx.error(500);
+      ctx.destroy();
     });
   }
-  listen(port = DEFAULT_PORT, host = DEFAULT_HOST) {
-    if (util.isObject(port)) {
-      host = port.host || DEFAULT_HOST;
-      port = port.port || DEFAULT_PORT;
-    }
+
+  initialize() {
     return this.logger.init().then(msg => {
       this.logger.debug(msg || 'logger got ready');
       return Promise.all([
-        new Promise(res => {
-          // nextTick 使得 listen 函数在路由定义之前调用,
-          // 也仍然会在全部路由定义好之后才真正执行
-          process.nextTick(() => {
-            this._route.build();
-            res();
-          });
-        }),
         this.db.init().then(msg => {
           this.logger.debug(msg || 'database got ready.');
         }),
@@ -140,8 +112,21 @@ class SilenceApplication {
         this.hasher.init().then(msg => {
           this.logger.debug(msg || 'password hasher got ready.');
         })
-      ]).then(() => {
-        return new Promise((resolve, reject) => {
+      ]);
+    });
+  }
+
+  listen(port = DEFAULT_PORT, host = DEFAULT_HOST) {
+    if (util.isObject(port)) {
+      host = port.host || DEFAULT_HOST;
+      port = port.port || DEFAULT_PORT;
+    }
+    this.initialize().then(() => {
+      return new Promise((resolve, reject) => {
+        // nextTick 使得 listen 函数在路由定义之前调用,
+        // 也仍然会在全部路由定义好之后才真正执行
+        process.nextTick(() => {
+          this._route.build();
           let server = http.createServer((request, response) => {
             this.handle(request, response);
           });
@@ -160,30 +145,37 @@ class SilenceApplication {
     this._route.get(...args);
     return this;
   }
+
   post(...args) {
     this._route.post(...args);
     return this;
   }
+
   rest(...args) {
     this._route.rest(...args);
     return this;
   }
+
   put(...args) {
     this._route.put(...args);
     return this;
   }
+
   del(...args) {
     this._route.del(...args);
     return this;
   }
+
   head(...args) {
     this._route.head(...args);
     return this;
   }
+
   group(...args) {
     this._route.group(...args);
     return this;
   }
+
   all(...args) {
     this._route.all(...args);
     return this;

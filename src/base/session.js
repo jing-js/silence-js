@@ -13,7 +13,7 @@ class BaseSessionStore extends BaseService {
    * @return Promise
    */
   get(sessionID) {
-
+    return Promise.resolve(null);
   }
 
   /**
@@ -22,7 +22,7 @@ class BaseSessionStore extends BaseService {
    * @return Promise
    */
   set(sessionId, sessionUser) {
-
+    return Promise.resolve(false);
   }
 }
 

@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('crypto');
+
 /**
  * Author: petar bojinov - @pbojinov
  * Github: https://github.com/pbojinov/request-ip
@@ -74,6 +76,38 @@ function getClientIp(req) {
   }
 }
 
+
+function genSessionKey() {
+  return new Promise((resolve, reject) => {
+    let tries = 0;
+    function tryGen() {
+      crypto.randomBytes(24, (err, buf) => {
+        if (!err) {
+          resolve(buf.toString('base64')
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, ''));
+        } else {
+          if (tries < 3) {
+            tries++;
+            tryGen()
+          } else {
+            reject(err);
+          }
+        }
+      });
+    }
+    tryGen();
+  });
+}
+
+function merge(src, dst) {
+  for(let k in dst) {
+    src[k] = dst[k];
+  }
+  return src;
+}
+
 module.exports = {
   isGenerateFunction(obj) {
     return typeof obj === 'function' && obj.constructor.name === 'GeneratorFunction';
@@ -93,5 +127,10 @@ module.exports = {
   isUndefined(obj) {
     return typeof obj === 'undefined';
   },
-  getClientIp
+  isDefined(obj) {
+    return typeof obj !== 'undefined'
+  },
+  merge,
+  getClientIp,
+  genSessionKey
 };

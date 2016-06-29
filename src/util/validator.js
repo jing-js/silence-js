@@ -1,12 +1,6 @@
 'use strict';
 
 module.exports = {
-  pass() {
-    return true;
-  },
-  require(val) {
-    return typeof val !== 'undefined' && val !== null;
-  },
   isArray(val) {
     return Array.isArray(val);
   },
@@ -15,6 +9,9 @@ module.exports = {
   },
   maxLength(val, length) {
     return val.length <= length;
+  },
+  rangeLength(val, minLength, maxLength) {
+    return val.length >= minLength && val.length <= maxLength;
   },
   max(val, bound) {
     return val <= bound;
@@ -30,9 +27,6 @@ module.exports = {
   },
   length(val, length) {
     return val.length === length;
-  },
-  type(val, type) {
-    return typeof val === type;
   },
   pattern(val, regExp) {
     return regExp.test(val);

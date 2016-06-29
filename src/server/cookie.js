@@ -66,10 +66,20 @@ class CookieStore {
     this._cookies = null;
   }
   get(name) {
-    if (!this._cookies) {
-      this._cookies = parseCookies(this.ctx.originRequest.headers.cookie || '');
+    // if (!this._cookies) {
+    //   this._cookies
+    //   // this._cookies = parseCookies(this.ctx.originRequest.headers.cookie || '');
+    // }
+    // return this._cookies.get(name);
+    let cookie = this.ctx.originRequest.headers.cookie;
+    if (!cookie) {
+      return null;
     }
-    return this._cookies.get(name);
+    let idx = cookie.indexOf(name);
+    if (idx < 0) {
+      return null;
+    }
+    
   }
   set(name, val, options = {}) {
     this.ctx.originResponse.setHeader('Set-Cookie', parseCookieStr(name, val, options));

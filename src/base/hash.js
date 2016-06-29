@@ -6,11 +6,11 @@ class BasePasswordHash  extends BaseService {
   constructor(){
     super();
   }
-  *encode(password) {
-
+  encode(password) {
+    return Promise.resolve(password);
   }
-  *verify(password, hash) {
-
+  verify(password, hash) {
+    return Promise.resolve(false);
   }
 }
 

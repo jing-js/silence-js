@@ -1,11 +1,12 @@
 'use strict';
 
-const BaseObject = require('./base');
+const BaseService = require('./base');
 
-class BaseDatabaseStore extends BaseObject {
-  constructor(logger) {
+class BaseDatabaseStore extends BaseService {
+  constructor(logger, type) {
     super();
     this.logger = logger;
+    this.type = type;
   }
 }
 

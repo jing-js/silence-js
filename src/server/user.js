@@ -2,19 +2,15 @@
 
 
 class SessionUser {
-  constructor(context) {
-    this.context = context;
-    this.sessionKey = '';
+  constructor() {
+    this.id = null;
+    this.name = null;
     this.isLogin = false;
-    this.rememberMe = false;
   }
   *login(rememberMe) {
     this.rememberMe = rememberMe;
-    let su = yield this.context.session.set(this.sessionKey, {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      rememberMe: user.rememberMe
+    let su = yield this.context.session.set(this.key, {
+      id: user.id
     });
     if (su && rememberMe) {
       let now = new Date();
@@ -23,9 +19,6 @@ class SessionUser {
     }
     this.isLogin = su;
     return su;
-  }
-  destroy() {
-    this.context = null;
   }
 }
 

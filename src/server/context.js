@@ -5,6 +5,7 @@ const url = require('url');
 const CookieStore = require('./cookie');
 
 const CODE_MESSAGES = new Map();
+CODE_MESSAGES.set(400, 'Bad Request');
 CODE_MESSAGES.set(404, 'Not Found');
 CODE_MESSAGES.set(401, 'Unauthorized');
 CODE_MESSAGES.set(500, 'Internal Server Error');
@@ -61,12 +62,12 @@ class SilenceContext {
   }
   get user() {
     if (!this._user) {
-      this._user = new this.app.SessionUser(this);
+      this._user = new this.app.SessionUser();
     }
     return this._user;
   }
   get isLogin() {
-    return this._user && this._user.isLogin;
+    return this._user !== null && this._user.isLogin;
   }
   get isSent() {
     return this._isSent;
@@ -97,6 +98,10 @@ class SilenceContext {
       data: this._body || ''
     }));
   }
+  *login(id, remember) {
+    this.user.id = id;
+    
+  }
   error(code, data) {
     if (!util.isNumber(code)) {
       data = code;
@@ -104,10 +109,10 @@ class SilenceContext {
     } else {
       data = CODE_MESSAGES.has(code) ? CODE_MESSAGES.get(code) : data
     }
-    this._send(code, data);
+    this._send(code, data || 'failure');
   }
   success(data) {
-    this._send(200, data);
+    this._send(200, data || 'success');
   }
   destroy() {
     if (this._user !== null) {
