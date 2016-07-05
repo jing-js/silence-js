@@ -1,6 +1,6 @@
 'use strict';
 
-const util = require('../util/util');
+const util = require('silence-js-util');
 
 const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'HEAD'];
 const ANY = 0xffff;
@@ -61,13 +61,21 @@ class Route {
   }
   match(method, url) {
     let p = this;
-    let params = [];
+    let params = null;
     let i = 0;
     let __pre_i = null;
     let end = url.length - 1;
+    while(i <= end) {
+      if (url.charCodeAt(i) === 63) { // '?'.charCodeAt(0) = 63
+        end = i - 1;
+        break;
+      }
+      i++;
+    }
     if (end > 1 && url.charCodeAt(end) === 47) {
       end--; // ignore last '/'
     }
+    i = 0;
     while(true) {
       if (p.code === ANY) {
         let pi = i;
@@ -75,6 +83,9 @@ class Route {
           i++;
         }
         __pre_i = null;
+        if (params === null) {
+          params = [];
+        }
         params.push(url.substring(pi, i));
       } else {
         let c = url.charCodeAt(i);
@@ -229,9 +240,10 @@ class RouteDefine {
   }
   destroy() {
     this.parent = null;
-    this.middlewares.length = 0;
+    this.handler = null;
+    this.middlewares = null;
     this.children.forEach(child => child.destroy());
-    this.children.length = 0;
+    this.children = null;
   }
 }
 
@@ -275,7 +287,7 @@ function buildTree(route, logger) {
         logger.error(`Duplicate route define, METHOD ${route.handler.method}, URL ${url}. process exit`);
         process.exit(-1);
       } else {
-        logger.debug(`Add router ${route.handler.method} ${url}`);
+        logger.debug(`Add router with ${route.handler.middlewares.length} middlewares: ${route.handler.method} ${url}`);
       }
       p.handler.set(route.handler.method, new AbstractHandler(route.handler.fn, route.handler.middlewares));
     }
@@ -297,7 +309,7 @@ class RouteManager extends RouteDefine {
     this.tree = null;
   }
   match(ctx) {
-    return this.tree.match(ctx.method, ctx.url.path, 0);
+    return this.tree.match(ctx.method, ctx.url, 0);
   }
   build() {
     this.tree = buildTree(this, this.logger);

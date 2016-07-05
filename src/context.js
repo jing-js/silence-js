@@ -1,6 +1,6 @@
 'use strict';
 
-const util = require('../util/util');
+const util = require('silence-js-util');
 const url = require('url');
 const CookieStore = require('./cookie');
 
@@ -13,15 +13,11 @@ CODE_MESSAGES.set(500, 'Internal Server Error');
 
 class SilenceContext {
   constructor(app, request, response) {
-    this.app = app;
-    this.originRequest = request;
-    this.originResponse = response;
-    this.url = url.parse(request.url);
-    this.req = {
-      query: this.url.query,
-      post: null,
-      files: null
-    };
+    this._app = app;
+    this._originRequest = request;
+    this._originResponse = response;
+    this._query = null;
+    this._post = null;
     this._user = null;
     this._cookie = null;
     this._store = null;
@@ -31,7 +27,7 @@ class SilenceContext {
     this._ip = null;
   }
   get method() {
-    return this.originRequest.method;
+    return this._originRequest.method;
   }
   get ip() {
     if (this._ip === null) {
@@ -40,7 +36,16 @@ class SilenceContext {
     return this._ip;
   }
   get headers() {
-    return this.originRequest.headers;
+    return this._originRequest.headers;
+  }
+  get url() {
+    return this._originRequest.url;
+  }
+  get query() {
+    if (this._query === null) {
+      this._query = url.parse(this.url, true).query;
+    }
+    return this._query;
   }
   get store() {
     if (this._store === null) {
@@ -55,14 +60,20 @@ class SilenceContext {
     return this._cookie;
   }
   get logger() {
-    return this.app.logger;
+    return this._app.logger;
   }
   get db() {
-    return this.app.db;
+    return this._app.db;
+  }
+  get hash() {
+    return this._app.hash;
+  }
+  get session() {
+    return this._app.session;
   }
   get user() {
     if (!this._user) {
-      this._user = new this.app.SessionUser();
+      this._user = this.session.createUser();
     }
     return this._user;
   }
@@ -90,17 +101,20 @@ class SilenceContext {
     this._code = code;
     this._body = data;
     this._isSent = true;
-    this.originResponse.writeHead(200, {
+    this._originResponse.writeHead(200, {
       'Content-Type': 'application/json;charset=utf-8'
     });
-    this.originResponse.end(JSON.stringify({
+    this._originResponse.end(JSON.stringify({
       code: this._code,
       data: this._body || ''
     }));
   }
   *login(id, remember) {
-    this.user.id = id;
-    
+    console.log(id, remember);
+    return true;
+  }
+  *logout() {
+
   }
   error(code, data) {
     if (!util.isNumber(code)) {
@@ -127,6 +141,12 @@ class SilenceContext {
       this._store.clear();
       this._store = null;
     }
+  }
+  *post(options) {
+    if (this._post === null) {
+      this._post = yield this._app.parser.post(this, options);
+    }
+    return this._post;
   }
 }
 

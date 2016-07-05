@@ -1,8 +1,7 @@
 'use strict';
 
-const util = require('../util/util');
+const util = require('silence-js-util');
 const SilenceContext = require('./context');
-const crypto = require('crypto');
 const RouteManager = require('./route');
 const co = require('co');
 const DEFAULT_PORT = 80;
@@ -12,37 +11,19 @@ const http = require('http');
 
 
 class SilenceApplication {
-  constructor(config, logger, db, session, hasher, SessionUser) {
+  constructor(config) {
     this.cors = config.cors || false;
-    this.logger = logger;
-    this.db = db;
-    this.session = session;
-    this.hasher = hasher;
-    this._route = new RouteManager(logger);
-    this.SessionUser = SessionUser;
-    this._sessionKey = config.session.key || 'SILENCE_SESSION';
+    this.logger = config.logger;
+    this.db = config.db;
+    this.session = config.session;
+    this.hash = config.hash;
+    this.parser = config.parser;
+    this._route = new RouteManager(config.logger);
 
     process.on('uncaughtException', err => {
-      console.log(err);
       this.logger.error('UNCAUGHT EXCEPTION');
       this.logger.error(err);
     });
-  }
-
-  *_checkSessionUser(ctx) {
-    let sid = ctx.cookie.get(this._sessionKey); //fetch cookie
-    let ru;
-    if (!sid) {
-      return;
-    }
-    ru = yield ctx.session.get(sid);
-    if (ru) {
-      let user = new this.SessionUser(ctx);
-      user.isLogin = true;
-      user.sessionKey = sid;
-      user.rememberMe = ru.rememberMe;
-      ctx._user = user;
-    }
   }
 
   handle(request, response) {
@@ -60,7 +41,7 @@ class SilenceApplication {
 
     var app = this;
     co(function*() {
-      yield app._checkSessionUser(ctx);
+      yield app.session.check(ctx);
       for (let i = 0; i < handler.middlewares.length; i++) {
         let fn = handler.middlewares[i];
         if (util.isGenerateFunction(fn)) {
@@ -78,6 +59,9 @@ class SilenceApplication {
         return handler.fn.apply(ctx, handler.params);
       }
     }).then(res => {
+      if (ctx.cookie._cookieToSend !== null) {
+        response.setHeader('Set-Cookie', ctx.cookie._cookieToSend);
+      }
       if (!ctx.isSent) {
         if (!util.isUndefined(res)) {
           ctx.success(res);
@@ -109,8 +93,8 @@ class SilenceApplication {
         this.session.init().then(msg => {
           this.logger.debug(msg || 'session got ready.');
         }),
-        this.hasher.init().then(msg => {
-          this.logger.debug(msg || 'password hasher got ready.');
+        this.hash.init().then(msg => {
+          this.logger.debug(msg || 'password hash got ready.');
         })
       ]);
     });
@@ -121,7 +105,7 @@ class SilenceApplication {
       host = port.host || DEFAULT_HOST;
       port = port.port || DEFAULT_PORT;
     }
-    this.initialize().then(() => {
+    return this.initialize().then(() => {
       return new Promise((resolve, reject) => {
         // nextTick 使得 listen 函数在路由定义之前调用,
         // 也仍然会在全部路由定义好之后才真正执行

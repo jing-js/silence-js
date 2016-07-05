@@ -1,6 +1,6 @@
 'use strict';
 
-const util = require('../util/util');
+const util = require('silence-js-util');
 
 function parseCookies(str) {
   let cookies = new Map();
@@ -63,26 +63,65 @@ function parseCookieStr(name, val, options) {
 class CookieStore {
   constructor(ctx) {
     this.ctx = ctx;
-    this._cookies = null;
+    this._cookie = null;
+    this._cookieToSend = null;
   }
   get(name) {
-    // if (!this._cookies) {
-    //   this._cookies
-    //   // this._cookies = parseCookies(this.ctx.originRequest.headers.cookie || '');
-    // }
-    // return this._cookies.get(name);
-    let cookie = this.ctx.originRequest.headers.cookie;
-    if (!cookie) {
+    if (this._cookie === null) {
+      this._cookie = this.ctx._originRequest.headers.cookie || '';
+    }
+    if (this._cookie === '') {
       return null;
     }
-    let idx = cookie.indexOf(name);
-    if (idx < 0) {
-      return null;
+    let idx = 0;
+    let c = 0;
+    let p0 = 0;
+    while(true) {
+      idx = this._cookie.indexOf(name, idx);
+      if (idx < 0) {
+        return null;
+      }
+      p0 = idx + name.length;
+      if (p0 >= this._cookie.length) {
+        return null;
+      }
+      if (idx > 0) {
+        c = this._cookie.charCodeAt(idx - 1);
+        if (c !== 32 && c!== 61 && c !== 59) {
+          idx = p0;
+          continue;
+        }
+      }
+      idx = p0;
+      c = this._cookie.charCodeAt(idx);
+      if (c === 32 || c === 61) {
+        break;
+      }
     }
-    
+
+    p0 = -1;
+    let p1 = -1;
+    while(idx < this._cookie.length) {
+      c = this._cookie.charCodeAt(idx);
+      if (p0 < 0 && c !== 32 && c !== 61) {
+        p0 = idx;
+      }
+      if (c === 59) {
+        p1 = idx;
+        break;
+      }
+      idx++;
+    }
+    if (p0 < 0) {
+      return '';
+    }
+    return this._cookie.substring(p0, p1 < 0 ? this._cookie.length : p1);
   }
   set(name, val, options = {}) {
-    this.ctx.originResponse.setHeader('Set-Cookie', parseCookieStr(name, val, options));
+    if (this._cookieToSend === null) {
+      this._cookieToSend = [];
+    }
+    this._cookieToSend.push(parseCookieStr(name, val, options));
   }
   destroy() {
     this.ctx = null;
