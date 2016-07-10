@@ -3,6 +3,7 @@
 const util = require('silence-js-util');
 const SilenceContext = require('./context');
 const RouteManager = require('./route');
+const CookieStore = require('./cookie');
 const co = require('co');
 const DEFAULT_PORT = 80;
 const DEFAULT_HOST = '0.0.0.0';
@@ -18,7 +19,9 @@ class SilenceApplication {
     this.session = config.session;
     this.hash = config.hash;
     this.parser = config.parser;
-    this._route = new RouteManager(config.logger);
+    this._ContextClass = config.ContextClass || SilenceContext;
+    this._CookieStoreClass = config.CookieStoreClass || CookieStore;
+    this._route = config.RouteManagerClass ? config.RouteManagerClass(config.logger) : new RouteManager(config.logger);
 
     process.on('uncaughtException', err => {
       this.logger.error('UNCAUGHT EXCEPTION');
@@ -27,21 +30,39 @@ class SilenceApplication {
   }
 
   handle(request, response) {
+    let handler = this._route.match(request.method, request.url, "OPTIONS_HANDLER");
+    if (handler === null) {
+      this.logger.error(`(404) ${request.method} ${request.url} not found`);
+      response.writeHead(404);
+      response.end();
+      // 如果还有更多的数据, 直接 destroy 掉。防止潜在的攻击。
+      // 大部份 web 服务器, 当 post 一个 404 的 url 时, 如果跟一个很大的文件, 也会让文件上传
+      //  (虽然只是在内存中转瞬即逝, 但总还是浪费了带宽)
+      // nginx 服务器对于 404 也不是立刻返回, 也会等待文件上传。 只不过 nginx 有默认的 max_body_size
+      request.on('data', () => {
+        this.logger.debug('DATA RECEIVED AFTER END');
+        request.destroy();
+      });
+      return;
+    }
     if (this.cors) {
       response.setHeader('Access-Control-Allow-Origin', this.cors);
     }
-    let ctx = new SilenceContext(this, request, response);
-    let handler = this._route.match(ctx);
-    if (!handler) {
-      this.logger.warn(`(404) ${ctx.method} ${request.url} not found`);
-      ctx.error(404);
-      ctx.destroy();
+    if (handler === 'OPTIONS_HANDLER') {
+      response.end();
+      request.on('data', () => {
+        this.logger.debug('DATA RECEIVED AFTER END');
+        request.destroy();
+      });
       return;
     }
 
-    var app = this;
+
+    let ctx = new this._ContextClass(this, request, response);
+
+    let app = this;
     co(function*() {
-      yield app.session.check(ctx);
+      yield app.session.touch(ctx);
       for (let i = 0; i < handler.middlewares.length; i++) {
         let fn = handler.middlewares[i];
         if (util.isGenerateFunction(fn)) {
@@ -65,22 +86,25 @@ class SilenceApplication {
       if (!ctx.isSent) {
         if (!util.isUndefined(res)) {
           ctx.success(res);
-        } else if (ctx._body !== undefined) {
+        } else if (ctx._body !== null) {
           ctx.success(ctx._body);
         } else {
           ctx.error(404);
         }
       }
+      _destroy();
+    }, _destroy).catch(_destroy);
+    
+    function _destroy(err) {
+      console.log('finish request', err);
+      if (err) {
+        app.logger.error(err);
+        if (!ctx.isSent) {
+          ctx.error(500);
+        }
+      }
       ctx.destroy();
-    }, err => {
-      this.logger.error(err);
-      ctx.error(500);
-      ctx.destroy();
-    }).catch(err => {
-      this.logger.error(err);
-      ctx.error(500);
-      ctx.destroy();
-    });
+    }
   }
 
   initialize() {

@@ -2,34 +2,6 @@
 
 const util = require('silence-js-util');
 
-function parseCookies(str) {
-  let cookies = new Map();
-
-  if (str === '') {
-    return cookies;
-  }
-
-  str.split(';').forEach(pair => {
-    let idx = pair.indexOf('=');
-    if (idx < 0) {
-      return;
-    }
-    let key = pair.substr(0, idx).trim();
-    if (cookies.has(key)) {
-      return; //only accept once
-    }
-    let val = pair.substr(++idx, pair.length).trim();
-    if (val.length > 0 && '"' === val[0]) {
-      val = val.slice(1, -1);
-    }
-    try {
-      cookies.set(key, decodeURIComponent(val));
-    } catch(ex) {
-      // ignore
-    }
-  });
-  return cookies;
-}
 
 function parseCookieStr(name, val, options) {
   let str = `${name}=${encodeURIComponent(val)}`;
@@ -62,14 +34,10 @@ function parseCookieStr(name, val, options) {
 
 class CookieStore {
   constructor(ctx) {
-    this.ctx = ctx;
-    this._cookie = null;
+    this._cookie = ctx._originRequest.headers.cookie || '';
     this._cookieToSend = null;
   }
   get(name) {
-    if (this._cookie === null) {
-      this._cookie = this.ctx._originRequest.headers.cookie || '';
-    }
     if (this._cookie === '') {
       return null;
     }
@@ -122,9 +90,6 @@ class CookieStore {
       this._cookieToSend = [];
     }
     this._cookieToSend.push(parseCookieStr(name, val, options));
-  }
-  destroy() {
-    this.ctx = null;
   }
 }
 

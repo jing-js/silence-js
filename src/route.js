@@ -59,7 +59,7 @@ class Route {
     }
     this.next.push(node);
   }
-  match(method, url) {
+  match(method, url, OPTIONS_HANDLER) {
     let p = this;
     let params = null;
     let i = 0;
@@ -106,7 +106,9 @@ class Route {
 
       if (i > end) {
         // console.log(p.handler);
-        if (p.handler === null || !p.handler.has(method)) {
+        if ((p.handler !== null && p.handler.has(method)) || (OPTIONS_HANDLER && method === 'OPTIONS')) {
+          break; // exit while
+        } else {
           if (__pre_i === null) {
             return null;
           } else {
@@ -115,8 +117,6 @@ class Route {
             // console.log('try last state');
             continue; // continue while, return to last state
           }
-        } else {
-          break; // exit while
         }
       }
       if (p.next === null) {
@@ -170,7 +170,7 @@ class Route {
         }
       }
     }
-    return new RuntimeHandler(p.handler.get(method), params);
+    return (p.handler && p.handler.has(method)) ? p.handler.get(method) : OPTIONS_HANDLER;
   }
 }
 
@@ -308,8 +308,8 @@ class RouteManager extends RouteDefine {
     this.logger = logger;
     this.tree = null;
   }
-  match(ctx) {
-    return this.tree.match(ctx.method, ctx.url, 0);
+  match(method, url, OPTIONS_HANDLER) {
+    return this.tree.match(method, url, OPTIONS_HANDLER);
   }
   build() {
     this.tree = buildTree(this, this.logger);
