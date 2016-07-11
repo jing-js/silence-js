@@ -46,7 +46,7 @@ class SilenceContext {
     let ratePaused = false;
     let rateTM = null;
     function onEnd(err) {
-      console.log('request read end', me.__parseState, err);
+      // console.log('request read end', me.__parseState, err);
       if (rateTM !== null) {
         clearTimeout(rateTM);
         rateTM = null;
@@ -67,13 +67,13 @@ class SilenceContext {
       req.removeListener('data', onData);
     }
     function onAborted() {
-      console.log('aborted')
+      // console.log('aborted')
       onEnd('request_aborted');
     }
     function onData(chunk) {
       // console.log('ctx inner on data', chunk.length)
       if (me._isSent) {
-        console.log('destroy connection');
+        // console.log('destroy connection');
         req.destroy();
         onEnd();
         return;
@@ -89,7 +89,7 @@ class SilenceContext {
       }
       let err = me.__parseOnData(chunk);
       if (err) {
-        console.log('meet error', err);
+        // console.log('meet error', err);
         me.__parseOnEnd(err);
         me.__parseState = 0;
         me.__parseOnEnd = null;
@@ -107,15 +107,15 @@ class SilenceContext {
       //   return;
       // }
       let should = me.__parseRate * tm;
-      console.log('check rate', tm, me.__parseBytes, should);
+      // console.log('check rate', tm, me.__parseBytes, should);
       if (me.__parseBytes > should) {
-        console.log('rate paused', me.__parseBytes, should, tm);
+        // console.log('rate paused', me.__parseBytes, should, tm);
         ratePaused = true;
         req.pause();
         rateTM = setTimeout(checkRate, ((me.__parseBytes - should) / me.__parseRate) | 0);
       } else if (ratePaused) {
         ratePaused = false;
-        console.log('rate resume');
+        // console.log('rate resume');
         req.resume();
       }
     }
@@ -152,7 +152,7 @@ class SilenceContext {
   destroy() {
     // console.log('destroy', this.__parseState)
     if (this.__parseState === 0) {
-      console.log('NOT END, so resume');
+      // console.log('NOT END, so resume');
       this._originRequest.resume();
     }
     if (this._store !== null) {

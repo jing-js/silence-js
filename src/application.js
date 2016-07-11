@@ -96,9 +96,8 @@ class SilenceApplication {
     }, _destroy).catch(_destroy);
     
     function _destroy(err) {
-      console.log('finish request', err);
       if (err) {
-        app.logger.error(err);
+        app.logger.error(typeof err === 'object' ? (err.message || err) : err);
         if (!ctx.isSent) {
           ctx.error(500);
         }
