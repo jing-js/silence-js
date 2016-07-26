@@ -32,7 +32,7 @@ class SilenceApplication {
   handle(request, response) {
     let handler = this._route.match(request.method, request.url, "OPTIONS_HANDLER");
     if (handler === null) {
-      this.logger.error(`(404) ${request.method} ${request.url} not found`);
+      this.logger.error('404', request.method, request.url);
       response.writeHead(404);
       response.end();
       // 如果还有更多的数据, 直接 destroy 掉。防止潜在的攻击。
@@ -47,8 +47,10 @@ class SilenceApplication {
     }
     if (this.cors) {
       response.setHeader('Access-Control-Allow-Origin', this.cors);
+      response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (handler === 'OPTIONS_HANDLER') {
+      this.logger.debug('200 OPTION ', request.url);
       response.end();
       request.on('data', () => {
         this.logger.debug('DATA RECEIVED AFTER END');
@@ -65,6 +67,7 @@ class SilenceApplication {
       yield app.session.touch(ctx);
       for (let i = 0; i < handler.middlewares.length; i++) {
         let fn = handler.middlewares[i];
+        console.log(handler.params)
         if (util.isGenerateFunction(fn)) {
           yield fn.apply(ctx, handler.params);
         } else {
@@ -102,6 +105,7 @@ class SilenceApplication {
           ctx.error(500);
         }
       }
+      app.logger.debug(ctx._code, request.method, request.url);
       ctx.destroy();
     }
   }

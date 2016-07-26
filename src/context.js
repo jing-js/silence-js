@@ -166,6 +166,7 @@ class SilenceContext {
     this._app = null;
     this._originRequest = null;
     this._originResponse = null;
+    this._body = null;
   }
   get method() {
     return this._originRequest.method;
@@ -270,7 +271,7 @@ class SilenceContext {
     this._send(code, data || 'failure');
   }
   success(data) {
-    this._send(200, data || 'success');
+    this._send(0, data || 'success');
   }
   _error(err) {
     if (typeof err !== 'string') {

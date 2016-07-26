@@ -170,7 +170,8 @@ class Route {
         }
       }
     }
-    return (p.handler && p.handler.has(method)) ? p.handler.get(method) : OPTIONS_HANDLER;
+    let handler = (p.handler && p.handler.has(method)) ? p.handler.get(method) : OPTIONS_HANDLER;
+    return new RuntimeHandler(handler, params);
   }
 }
 
