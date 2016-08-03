@@ -59,7 +59,6 @@ class SilenceApplication {
       return;
     }
 
-
     let ctx = new this._ContextClass(this, request, response);
 
     let app = this;
@@ -79,8 +78,10 @@ class SilenceApplication {
       }
       if (util.isGenerateFunction(handler.fn)) {
         return yield handler.fn.apply(ctx, handler.params);
-      } else {
+      } else if (util.isFunction(handler.fn)) {
         return handler.fn.apply(ctx, handler.params);
+      } else {
+        app.logger.error(`Handler is not function`);
       }
     }).then(res => {
       if (ctx.cookie._cookieToSend !== null) {
@@ -101,6 +102,7 @@ class SilenceApplication {
     function _destroy(err) {
       if (err) {
         app.logger.error(typeof err === 'object' ? (err.message || err) : err);
+        console.log(err);
         if (!ctx.isSent) {
           ctx.error(500);
         }

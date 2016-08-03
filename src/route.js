@@ -105,7 +105,6 @@ class Route {
       }
 
       if (i > end) {
-        // console.log(p.handler);
         if ((p.handler !== null && p.handler.has(method)) || (OPTIONS_HANDLER && method === 'OPTIONS')) {
           break; // exit while
         } else {
