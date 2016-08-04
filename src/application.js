@@ -63,10 +63,11 @@ class SilenceApplication {
 
     let app = this;
     co(function*() {
-      yield app.session.touch(ctx);
+      if (app.session) {
+        yield app.session.touch(ctx);
+      }
       for (let i = 0; i < handler.middlewares.length; i++) {
         let fn = handler.middlewares[i];
-        console.log(handler.params)
         if (util.isGenerateFunction(fn)) {
           yield fn.apply(ctx, handler.params);
         } else {
@@ -116,15 +117,15 @@ class SilenceApplication {
     return this.logger.init().then(msg => {
       this.logger.debug(msg || 'logger got ready');
       return Promise.all([
-        this.db.init().then(msg => {
+        this.db ? this.db.init().then(msg => {
           this.logger.debug(msg || 'database got ready.');
-        }),
-        this.session.init().then(msg => {
+        }) : Promise.resolve(),
+        this.session ? this.session.init().then(msg => {
           this.logger.debug(msg || 'session got ready.');
-        }),
-        this.hash.init().then(msg => {
+        }) : Promise.resolve(),
+        this.hash ? this.hash.init().then(msg => {
           this.logger.debug(msg || 'password hash got ready.');
-        })
+        }) : Promise.resolve()
       ]);
     });
   }
