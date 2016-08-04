@@ -1,6 +1,6 @@
 {
   "name": "silence-js-core",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "simple but enough web framework",
   "main": "src/silence.js",
   "scripts": {
