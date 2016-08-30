@@ -3,7 +3,17 @@
 const util = require('silence-js-util');
 const url = require('url');
 
-const CODE_MESSAGES = require('http').STATUS_CODES;
+const STATUS = (function () {
+  let CODES = require('http').STATUS_CODES;
+  let map = new Map();
+  for(let k in CODES) {
+    map.set(parseInt(k), JSON.stringify({
+      code: parseInt(k),
+      data: CODES[k]
+    }, null, '  '));
+  }
+  return map;
+})();
 
 class RequestReader {
   constructor(onData, onEnd) {
@@ -18,6 +28,9 @@ class RequestReader {
 
 class SilenceContext {
   constructor(app, request, response) {
+
+    this.$$freeListIsUsed = true;
+
     this._app = app;
     this._originRequest = request;
     this._originResponse = response;
@@ -31,13 +44,42 @@ class SilenceContext {
     this._isSent = false;
     this._body = null;
     this._ip = null;
-
+    this._duration = Date.now(); // duration of each request
     this.__parseState = 0; // 0: paused, 1: reading, 2: end
     this.__parseBytes = 0;
     this.__parseTime = 0;
     this.__parseRate = 0;
     this.__parseLimit = 0;
     this.__parseOnData = null;
+    this.__parseOnEnd = null;
+    this.__initParse();
+  }
+
+  // Class constructor SilenceContext cannot be invoked without 'new' 
+  // if we direct use constructor to reinit 
+  $$freeListInit(app, request, response) {
+    this.$$freeListIsUsed = true;
+    this._app = app;
+    this._originRequest = request;
+    this._originResponse = response;
+    this._query = null;
+    this._post = null;
+    this._multipart = null;
+    this._user = null;
+    this._cookie = null;
+    this._store = null;
+    this._code = 200;
+    this._isSent = false;
+    this._body = null;
+    this._ip = null;
+    this._duration = Date.now(); // duration of each request
+    this.__parseState = 0; // 0: paused, 1: reading, 2: end
+    this.__parseBytes = 0;
+    this.__parseTime = 0;
+    this.__parseRate = 0;
+    this.__parseLimit = 0;
+    this.__parseOnData = null;
+    this.__parseOnEnd = null;
     this.__initParse();
   }
   __initParse() {
@@ -149,10 +191,8 @@ class SilenceContext {
     this.__parseState = 1;
     return true;
   }
-  destroy() {
-    // console.log('destroy', this.__parseState)
+  $$freeListFree() {
     if (this.__parseState === 0) {
-      // console.log('NOT END, so resume');
       this._originRequest.resume();
     }
     if (this._store !== null) {
@@ -161,19 +201,29 @@ class SilenceContext {
     }
     this.__parseOnData = null;
     this.__parseOnEnd = null;
-    this._user = null;
-    this._cookie = null;
+    if (this._user) {
+      this._app.session.freeUser(this._user);
+      this._user = null;
+    }
+    if (this._cookie) {
+      this._app._CookieStoreFreeList.free(this._cookie);
+      this._cookie = null;
+    }
     this._app = null;
     this._originRequest = null;
     this._originResponse = null;
     this._body = null;
+    this.$$freeListIsUsed = false;
+  }
+  get duration() {
+    return Date.now() - this._duration;
   }
   get method() {
     return this._originRequest.method;
   }
   get ip() {
     if (this._ip === null) {
-      this._ip = util.getClientIp(this);
+      this._ip = util.getClientIp(this._originRequest);
     }
     return this._ip;
   }
@@ -197,7 +247,7 @@ class SilenceContext {
   }
   get cookie() {
     if (this._cookie === null) {
-      this._cookie = new this._app._CookieStoreClass(this);
+      this._cookie = this._app._CookieStoreFreeList.alloc(this);
     }
     return this._cookie;
   }
@@ -230,26 +280,27 @@ class SilenceContext {
   }
   set body(val) {
     if (this._isSent) {
-      logger.warn('Body can\'t be set after response sent!');
+      logger.error('Body can\'t be set after response sent!');
       return;
     }
     this._body = val;
   }
   _send(code, data) {
     if (this._isSent) {
-      this.logger.warn('Response can\'t be sent multi times!');
+      this.logger.error('Response can\'t be sent multi times!');
       return;
     }
     this._code = code;
     this._body = data;
     this._isSent = true;
-    this._originResponse.writeHead(200, {
+    let hc = this._code === 0 || this._code >= 1000 ? 200 : this._code;
+    this._originResponse.writeHead(hc, {
       'Content-Type': 'application/json;charset=utf-8'
     });
-    this._originResponse.end(JSON.stringify({
+    this._originResponse.end(this._code !== 0 && this._code < 1000 && STATUS.has(hc) ? STATUS.get(hc) : JSON.stringify({
       code: this._code,
       data: this._body || ''
-    }));
+    }, null, '  '));
   }
   *login(identity, remember) {
     this.user.assign(identity);
@@ -265,13 +316,11 @@ class SilenceContext {
     if (!util.isNumber(code)) {
       data = code;
       code = 1000;
-    } else {
-      data = CODE_MESSAGES.hasOwnProperty(code) ? CODE_MESSAGES[code] : data
     }
-    this._send(code, data || 'failure');
+    this._send(code, data);
   }
   success(data) {
-    this._send(0, data || 'success');
+    this._send(0, data);
   }
   _error(err) {
     if (typeof err !== 'string') {

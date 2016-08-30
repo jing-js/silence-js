@@ -2,6 +2,7 @@
 
 const util = require('silence-js-util');
 const SilenceContext = require('./context');
+const FreeList = util.FreeList;
 const RouteManager = require('./route');
 const CookieStore = require('./cookie');
 const co = require('co');
@@ -9,7 +10,8 @@ const DEFAULT_PORT = 80;
 const DEFAULT_HOST = '0.0.0.0';
 
 const http = require('http');
-
+const STATUS_CODES = http.STATUS_CODES;
+const NOT_FOUND_MESSAGE = `{\n  "code": 404,\n  "data": "${STATUS_CODES['404']}"\n}`;
 
 class SilenceApplication {
   constructor(config) {
@@ -19,22 +21,21 @@ class SilenceApplication {
     this.session = config.session;
     this.hash = config.hash;
     this.parser = config.parser;
-    this._ContextClass = config.ContextClass || SilenceContext;
-    this._CookieStoreClass = config.CookieStoreClass || CookieStore;
     this._route = config.RouteManagerClass ? config.RouteManagerClass(config.logger) : new RouteManager(config.logger);
-
+    this._CookieStoreFreeList = new FreeList(config.CookieStoreClass || CookieStore);
+    this._ContextFreeList = new FreeList(config.ContextClass || SilenceContext);
     process.on('uncaughtException', err => {
       this.logger.error('UNCAUGHT EXCEPTION');
-      this.logger.error(err);
+      this.logger.error(err.stack || err.message || err.toString());
     });
   }
 
   handle(request, response) {
     let handler = this._route.match(request.method, request.url, "OPTIONS_HANDLER");
     if (handler === null) {
-      this.logger.error('404', request.method, request.url);
+      this.logger.access(request.method, 404, 0, util.getClientIp(request), request.url);
       response.writeHead(404);
-      response.end();
+      response.end(NOT_FOUND_MESSAGE);
       // 如果还有更多的数据, 直接 destroy 掉。防止潜在的攻击。
       // 大部份 web 服务器, 当 post 一个 404 的 url 时, 如果跟一个很大的文件, 也会让文件上传
       //  (虽然只是在内存中转瞬即逝, 但总还是浪费了带宽)
@@ -50,7 +51,7 @@ class SilenceApplication {
       response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (handler === 'OPTIONS_HANDLER') {
-      this.logger.debug('200 OPTION ', request.url);
+      this.logger.access('OPTION', 200, 0, util.getClientIp(request), request.url);
       response.end();
       request.on('data', () => {
         this.logger.debug('DATA RECEIVED AFTER END');
@@ -59,8 +60,8 @@ class SilenceApplication {
       return;
     }
 
-    let ctx = new this._ContextClass(this, request, response);
-
+    let ctx = this._ContextFreeList.alloc(this, request, response);
+    
     let app = this;
     co(function*() {
       if (app.session) {
@@ -102,14 +103,13 @@ class SilenceApplication {
     
     function _destroy(err) {
       if (err) {
-        app.logger.error(typeof err === 'object' ? (err.message || err) : err);
-        console.log(err);
+        app.logger.error(err.stack || err.mssage || err.toString());
         if (!ctx.isSent) {
           ctx.error(500);
         }
       }
-      app.logger.debug(ctx._code, request.method, request.url);
-      ctx.destroy();
+      app.logger.access(request.method, ctx._code, ctx.duration, ctx.ip, request.url);
+      app._ContextFreeList.free(ctx);
     }
   }
 
@@ -126,7 +126,15 @@ class SilenceApplication {
         this.hash ? this.hash.init().then(msg => {
           this.logger.debug(msg || 'password hash got ready.');
         }) : Promise.resolve()
-      ]);
+      ]).then(() => {
+        process.on('exit', () => {
+          console.log('Bye');
+          this.logger.close();
+          this.db && this.db.close();
+          this.hash && this.hash.close();
+          this.session && this.session.close();
+        });
+      });
     });
   }
 

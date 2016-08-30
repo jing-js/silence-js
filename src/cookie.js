@@ -34,8 +34,19 @@ function parseCookieStr(name, val, options) {
 
 class CookieStore {
   constructor(ctx) {
+    this.$$freeListIsUsed = true;
     this._cookie = ctx._originRequest.headers.cookie || '';
-    this._cookieToSend = null;
+    this._cookieToSend = [];
+  }
+  $$freeListFree() {
+    this.$$freeListIsUsed = false;
+    this._cookieToSend.length = 0;
+    this._cookie = '';
+  }
+  $$freeListInit(ctx) {
+    this.$$freeListIsUsed = true;
+    this._cookie = ctx._originRequest.headers.cookie || '';
+    this._cookieToSend.length = 0;
   }
   get(name) {
     if (this._cookie === '') {

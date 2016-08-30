@@ -86,7 +86,7 @@ class Route {
         if (params === null) {
           params = [];
         }
-        params.push(url.substring(pi, i));
+        params.push(decodeURIComponent(url.substring(pi, i)));
       } else {
         let c = url.charCodeAt(i);
         if (c !== p.code) {
