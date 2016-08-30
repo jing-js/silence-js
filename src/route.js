@@ -174,8 +174,8 @@ class Route {
   }
 }
 
-function concatUrl(url, sub) {
-  let newUrl = (url + '/' + sub).replace(/\/+/g, '/');
+function concatUrl(url, sub, sep = '/') {
+  let newUrl = (url + sep + sub).replace(/\/+/g, '/');
   if (newUrl[0] !== '/') {
     newUrl = '/' + newUrl;
   }
@@ -219,14 +219,20 @@ class RouteDefine {
     METHODS.forEach(med => this._route(med, ...args));
     return this;
   }
-  rest(name, ...args) {
+  rest(...args) {
+    let isN = util.isString(args[0]);
     let controllers = args[args.length - 1];
-    let middlewares = args.slice(0, args.length - 1);
-    this.get(name + 's', ...middlewares, controllers.list);
-    this.post(name + 's', ...middlewares, controllers.create);
-    this.put(name + '/:id', ...middlewares, controllers.update);
-    this.del(name + '/:id', ...middlewares, controllers.remove);
-    this.get(name + '/:id', ...middlewares, controllers.view);
+    let middlewares = args.slice(isN ? 1 : 0, args.length - 1);
+    this.get(isN ? args[0] + 's' : 's', ...middlewares, controllers.list);
+    this.post(isN ? args[0] + 's' : 's', ...middlewares, controllers.create);
+    if (!isN) {
+      let ch = this.children;
+      ch[ch.length - 1].url = concatUrl(this.url, 's', '');
+      ch[ch.length - 2].url = concatUrl(this.url, 's', '');
+    }
+    this.put(`${isN ? args[0] + '/' : ''}:id`, ...middlewares, controllers.update);
+    this.del(`${isN ? args[0] + '/' : ''}:id`, ...middlewares, controllers.remove);
+    this.get(`${isN ? args[0] + '/' : ''}:id`, ...middlewares, controllers.view);
     return this;
   }
   group(...args) {
