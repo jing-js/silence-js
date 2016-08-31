@@ -2,7 +2,7 @@
 
 const util = require('silence-js-util');
 
-const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'HEAD'];
+const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS'];
 const ANY = 0xffff;
 
 class AbstractHandler {
@@ -83,10 +83,12 @@ class Route {
           i++;
         }
         __pre_i = null;
-        if (params === null) {
-          params = [];
+        if (method !== 'OPTIONS') {
+          if (params === null) {
+            params = [];
+          }
+          params.push(decodeURIComponent(url.substring(pi, i)));
         }
-        params.push(decodeURIComponent(url.substring(pi, i)));
       } else {
         let c = url.charCodeAt(i);
         if (c !== p.code) {
@@ -105,7 +107,7 @@ class Route {
       }
 
       if (i > end) {
-        if ((p.handler !== null && p.handler.has(method)) || (OPTIONS_HANDLER && method === 'OPTIONS')) {
+        if ((p.handler !== null && p.handler.has(method)) || method === 'OPTIONS') {
           break; // exit while
         } else {
           if (__pre_i === null) {
@@ -169,8 +171,7 @@ class Route {
         }
       }
     }
-    let handler = (p.handler && p.handler.has(method)) ? p.handler.get(method) : OPTIONS_HANDLER;
-    return new RuntimeHandler(handler, params);
+    return method === 'OPTIONS' ? OPTIONS_HANDLER : new RuntimeHandler(p.handler.get(method), params);
   }
 }
 
@@ -214,6 +215,9 @@ class RouteDefine {
   }
   head(...args) {
     return this._route('HEAD', ...args);
+  }
+  options(...args) {
+    return this._route('OPTIONS', ...args);
   }
   all(...args) {
     METHODS.forEach(med => this._route(med, ...args));

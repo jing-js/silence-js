@@ -291,16 +291,16 @@ class SilenceContext {
       return;
     }
     this._code = code;
-    this._body = data;
+    this._body = this._code !== 0 && this._code < 1000 && STATUS.has(hc) ? STATUS.get(hc) : JSON.stringify({
+      code: this._code,
+      data: data || ''
+    }, null, '  ');
     this._isSent = true;
     let hc = this._code === 0 || this._code >= 1000 ? 200 : this._code;
     this._originResponse.writeHead(hc, {
       'Content-Type': 'application/json;charset=utf-8'
     });
-    this._originResponse.end(this._code !== 0 && this._code < 1000 && STATUS.has(hc) ? STATUS.get(hc) : JSON.stringify({
-      code: this._code,
-      data: this._body || ''
-    }, null, '  '));
+    this._originResponse.end(this._body);
   }
   *login(identity, remember) {
     this.user.assign(identity);

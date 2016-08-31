@@ -33,9 +33,9 @@ class SilenceApplication {
   handle(request, response) {
     let handler = this._route.match(request.method, request.url, "OPTIONS_HANDLER");
     if (handler === null) {
-      this.logger.access(request.method, 404, 0, util.getClientIp(request), request.url);
       response.writeHead(404);
       response.end(NOT_FOUND_MESSAGE);
+      this.logger.access(request.method, 404, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), request.url);
       // 如果还有更多的数据, 直接 destroy 掉。防止潜在的攻击。
       // 大部份 web 服务器, 当 post 一个 404 的 url 时, 如果跟一个很大的文件, 也会让文件上传
       //  (虽然只是在内存中转瞬即逝, 但总还是浪费了带宽)
@@ -51,7 +51,7 @@ class SilenceApplication {
       response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (handler === 'OPTIONS_HANDLER') {
-      this.logger.access('OPTION', 200, 0, util.getClientIp(request), request.url);
+      this.logger.access('OPTIONS', 200, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), request.url);
       response.end();
       request.on('data', () => {
         this.logger.debug('DATA RECEIVED AFTER END');
@@ -108,7 +108,8 @@ class SilenceApplication {
           ctx.error(500);
         }
       }
-      app.logger.access(request.method, ctx._code, ctx.duration, ctx.ip, request.url);
+      let identity = ctx._user && ctx._user._attrs ? (ctx._user._attrs.id || null) : null;
+      app.logger.access(ctx.method, ctx._code, ctx.duration, request.headers['content-length'] || 0, ctx._body.length, identity, util.getClientIp(request), request.url);
       app._ContextFreeList.free(ctx);
     }
   }
@@ -138,11 +139,9 @@ class SilenceApplication {
     });
   }
 
-  listen(port = DEFAULT_PORT, host = DEFAULT_HOST) {
-    if (util.isObject(port)) {
-      host = port.host || DEFAULT_HOST;
-      port = port.port || DEFAULT_PORT;
-    }
+  listen(listenConfig) {
+    let port = listenConfig.port || DEFAULT_PORT;
+    let host = listenConfig.host || DEFAULT_HOST;
     return this.initialize().then(() => {
       return new Promise((resolve, reject) => {
         // nextTick 使得 listen 函数在路由定义之前调用,
