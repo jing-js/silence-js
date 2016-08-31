@@ -2,6 +2,7 @@
 
 const util = require('silence-js-util');
 const SilenceContext = require('./context');
+const cluster = require('cluster');
 const FreeList = util.FreeList;
 const RouteManager = require('./route');
 const CookieStore = require('./cookie');
@@ -28,6 +29,7 @@ class SilenceApplication {
       this.logger.error('UNCAUGHT EXCEPTION');
       this.logger.error(err.stack || err.message || err.toString());
     });
+    this.__cleanup = false;
   }
 
   handle(request, response) {
@@ -128,15 +130,24 @@ class SilenceApplication {
           this.logger.debug(msg || 'password hash got ready.');
         }) : Promise.resolve()
       ]).then(() => {
-        process.on('exit', () => {
-          console.log('Bye');
-          this.logger.close();
-          this.db && this.db.close();
-          this.hash && this.hash.close();
-          this.session && this.session.close();
-        });
+        process.on('exit', this._exit.bind(this, false));
+        process.on('SIGTERM', this._exit.bind(this, true));
+        process.on('SIGINT', this._exit.bind(this, true));
       });
     });
+  }
+
+  _exit(needExit) {
+    if (this.__cleanup) {
+      return;
+    }
+    console.log((cluster.isWorker ? `[${cluster.worker.id}] ` : '') + 'Clean up Silence JS and bye!');
+    this.__cleanup = true;
+    this.logger.close();
+    this.db && this.db.close();
+    this.hash && this.hash.close();
+    this.session && this.session.close();
+    needExit && process.exit();
   }
 
   listen(listenConfig) {

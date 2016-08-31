@@ -291,12 +291,12 @@ class SilenceContext {
       return;
     }
     this._code = code;
+    let hc = this._code === 0 || this._code >= 1000 ? 200 : this._code;
     this._body = this._code !== 0 && this._code < 1000 && STATUS.has(hc) ? STATUS.get(hc) : JSON.stringify({
       code: this._code,
       data: data || ''
     }, null, '  ');
     this._isSent = true;
-    let hc = this._code === 0 || this._code >= 1000 ? 200 : this._code;
     this._originResponse.writeHead(hc, {
       'Content-Type': 'application/json;charset=utf-8'
     });
