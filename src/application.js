@@ -53,6 +53,8 @@ class SilenceApplication {
           this.__checkReload();
         } else if (msg === 'STATUS') {
           util.logStatus(this.__collectStatus());
+        } else if (msg === 'STOP') {
+          this._exit(true);
         }
       });
     }
