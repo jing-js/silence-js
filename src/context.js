@@ -27,20 +27,21 @@ class RequestReader {
 }
 
 class SilenceContext {
-  constructor(app, request, response) {
+  constructor() {
 
-    this.$$freeListIsUsed = true;
+    this.$$freeListPosition = -1;
+    this.$$freeListNext = -1;
 
-    this._app = app;
-    this._originRequest = request;
-    this._originResponse = response;
+    this._app = null;
+    this._originRequest = null;
+    this._originResponse = null;
     this._query = null;
     this._post = null;
     this._multipart = null;
     this._user = null;
     this._cookie = null;
     this._store = null;
-    this._code = 200;
+    this._code = 0;
     this._isSent = false;
     this._body = null;
     this._ip = null;
@@ -52,35 +53,47 @@ class SilenceContext {
     this.__parseLimit = 0;
     this.__parseOnData = null;
     this.__parseOnEnd = null;
+    
+  }
+  $$freeListInit(app, request, response) {
+    this._app = app;
+    this._originRequest = request;
+    this._originResponse = response;
+    this._isSent = false;
+    this._code = 0;
+    this._duration = Date.now(); // duration of each request
     this.__initParse();
   }
-
-  // Class constructor SilenceContext cannot be invoked without 'new' 
-  // if we direct use constructor to reinit 
-  $$freeListInit(app, request, response) {
-    this.$$freeListIsUsed = true;
-    this._app = app;
-    this._originRequest = request;
-    this._originResponse = response;
+  $$freeListFree() {
+    if (this.__parseState === 0) {
+      this._originRequest.resume();
+    }
+    if (this._user) {
+      this._app.session.freeUser(this._user);
+      this._user = null;
+    }
+    if (this._cookie) {
+      this._app._CookieStoreFreeList.free(this._cookie);
+      this._cookie = null;
+    }
+    if (this._store) {
+      this._store.clear();
+    }
+    this._app = null;
+    this._originRequest = null;
+    this._originResponse = null;
+    this._body = null;
     this._query = null;
     this._post = null;
     this._multipart = null;
-    this._user = null;
-    this._cookie = null;
-    this._store = null;
-    this._code = 200;
-    this._isSent = false;
-    this._body = null;
     this._ip = null;
-    this._duration = Date.now(); // duration of each request
-    this.__parseState = 0; // 0: paused, 1: reading, 2: end
+    this.__parseState = 0;
     this.__parseBytes = 0;
     this.__parseTime = 0;
     this.__parseRate = 0;
     this.__parseLimit = 0;
     this.__parseOnData = null;
     this.__parseOnEnd = null;
-    this.__initParse();
   }
   __initParse() {
     let me = this;
@@ -191,30 +204,7 @@ class SilenceContext {
     this.__parseState = 1;
     return true;
   }
-  $$freeListFree() {
-    if (this.__parseState === 0) {
-      this._originRequest.resume();
-    }
-    if (this._store !== null) {
-      this._store.clear();
-      this._store = null;
-    }
-    this.__parseOnData = null;
-    this.__parseOnEnd = null;
-    if (this._user) {
-      this._app.session.freeUser(this._user);
-      this._user = null;
-    }
-    if (this._cookie) {
-      this._app._CookieStoreFreeList.free(this._cookie);
-      this._cookie = null;
-    }
-    this._app = null;
-    this._originRequest = null;
-    this._originResponse = null;
-    this._body = null;
-    this.$$freeListIsUsed = false;
-  }
+  
   get duration() {
     return Date.now() - this._duration;
   }
@@ -248,6 +238,8 @@ class SilenceContext {
   get cookie() {
     if (this._cookie === null) {
       this._cookie = this._app._CookieStoreFreeList.alloc(this);
+      console.trace();
+
     }
     return this._cookie;
   }
@@ -265,7 +257,7 @@ class SilenceContext {
   }
   get user() {
     if (!this._user) {
-      this._user = this.session.createUser();
+      this._user = this._app.session.createUser();
     }
     return this._user;
   }

@@ -23,8 +23,8 @@ class SilenceApplication {
     this.hash = config.hash;
     this.parser = config.parser;
     this._route = config.RouteManagerClass ? config.RouteManagerClass(config.logger) : new RouteManager(config.logger);
-    this._CookieStoreFreeList = new FreeList(config.CookieStoreClass || CookieStore);
-    this._ContextFreeList = new FreeList(config.ContextClass || SilenceContext);
+    this._CookieStoreFreeList = new FreeList(config.CookieStoreClass || CookieStore, config.freeListSize);
+    this._ContextFreeList = new FreeList(config.ContextClass || SilenceContext, config.freeListSize);
     process.on('uncaughtException', err => {
       this.logger.error('UNCAUGHT EXCEPTION');
       this.logger.error(err.stack || err.message || err.toString());
@@ -88,7 +88,7 @@ class SilenceApplication {
         app.logger.error(`Handler is not function`);
       }
     }).then(res => {
-      if (ctx.cookie._cookieToSend !== null) {
+      if (ctx._cookie && ctx._cookie._cookieToSend.length > 0) {
         response.setHeader('Set-Cookie', ctx.cookie._cookieToSend);
       }
       if (!ctx.isSent) {
@@ -160,7 +160,8 @@ class SilenceApplication {
         process.nextTick(() => {
           this._route.build();
           let server = http.createServer((request, response) => {
-            this.handle(request, response);
+            // this.handle(request, response);
+            response.end('OK');
           });
           server.on('error', reject);
           server.listen(port, host, resolve);
