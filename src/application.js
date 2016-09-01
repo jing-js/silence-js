@@ -1,5 +1,6 @@
 'use strict';
 
+const $util = require('util');
 const util = require('silence-js-util');
 const SilenceContext = require('./context');
 const cluster = require('cluster');
@@ -13,6 +14,13 @@ const DEFAULT_HOST = '0.0.0.0';
 const http = require('http');
 const STATUS_CODES = http.STATUS_CODES;
 const NOT_FOUND_MESSAGE = `{\n  "code": 404,\n  "data": "${STATUS_CODES['404']}"\n}`;
+const NOT_AVALIABLE_MESSAGE = `{\n "code": 503,\n "data": "${STATUS_CODES['503']}"\n}`;
+
+if (cluster.isWorker) {
+  process.title = 'SILENCE_JS_WORKER_' + cluster.worker.id;
+} else {
+  process.title = 'SILENCE_JS';
+}
 
 class SilenceApplication {
   constructor(config) {
@@ -25,27 +33,74 @@ class SilenceApplication {
     this._route = config.RouteManagerClass ? config.RouteManagerClass(config.logger) : new RouteManager(config.logger);
     this._CookieStoreFreeList = new FreeList(config.CookieStoreClass || CookieStore, config.freeListSize);
     this._ContextFreeList = new FreeList(config.ContextClass || SilenceContext, config.freeListSize);
+
+
+    this.__PCUBound = config.PCUBound || 1000;
+    this.__cleanup = false;
+    this.__needReload = false;
+    this.__connectionCount = 0;
+    this.__maxConnectionCount = 0;
+
     process.on('uncaughtException', err => {
       this.logger.error('UNCAUGHT EXCEPTION');
       this.logger.error(err.stack || err.message || err.toString());
     });
-    this.__cleanup = false;
+
+    if (cluster.isWorker) {
+      process.on('message', msg => {
+        if (msg === 'RELOAD') {
+          this.__needReload = true;
+          this.__checkReload();
+        } else if (msg === 'STATUS') {
+          util.logStatus(this.__collectStatus());
+        }
+      });
+    }
+    process.on('SIGINFO', () => {
+      util.logStatus(this.__collectStatus());
+    });
+    process.on('SIGHUP', () => {
+      this.__needReload = true;
+      this.__checkReload();
+    });
   }
 
+  __collectStatus() {
+    return {
+      connectionCount: this.__connectionCount
+    };
+  }
+
+  __checkReload() {
+    if (this.__connectionCount === 0 && this.__needReload) {
+      this.logger.debug(process.title, 'exit for reload');
+      this._exit(true);
+    }
+  }
+
+  _end(request, response, statusCode, text) {
+    response.writeHead(statusCode);
+    response.end(text);
+    // 如果还有更多的数据, 直接 destroy 掉。防止潜在的攻击。
+    // 大部份 web 服务器, 当 post 一个 404 的 url 时, 如果跟一个很大的文件, 也会让文件上传
+    //  (虽然只是在内存中转瞬即逝, 但总还是浪费了带宽)
+    // nginx 服务器对于 404 也不是立刻返回, 也会等待文件上传。 只不过 nginx 有默认的 max_body_size
+    // 暂时不清楚是否可以更直观地判断, request 中是否还有待上传的内容。
+    request.on('data', () => {
+      request.destroy();
+    });
+  }
   handle(request, response) {
+    if (this.__needReload) {
+      this._end(request, response, 503, NOT_AVALIABLE_MESSAGE);
+      return;
+    }
+
     let handler = this._route.match(request.method, request.url, "OPTIONS_HANDLER");
     if (handler === null) {
-      response.writeHead(404);
-      response.end(NOT_FOUND_MESSAGE);
-      this.logger.access(request.method, 404, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), request.url);
-      // 如果还有更多的数据, 直接 destroy 掉。防止潜在的攻击。
-      // 大部份 web 服务器, 当 post 一个 404 的 url 时, 如果跟一个很大的文件, 也会让文件上传
-      //  (虽然只是在内存中转瞬即逝, 但总还是浪费了带宽)
-      // nginx 服务器对于 404 也不是立刻返回, 也会等待文件上传。 只不过 nginx 有默认的 max_body_size
-      request.on('data', () => {
-        this.logger.debug('DATA RECEIVED AFTER END');
-        request.destroy();
-      });
+      this._end(request, response, 404, NOT_FOUND_MESSAGE);
+      this.logger.access(request.method, 404, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), request.headers['user-agent'], request.url);
+      this.__checkReload();
       return;
     }
     if (this.cors) {
@@ -53,17 +108,21 @@ class SilenceApplication {
       response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (handler === 'OPTIONS_HANDLER') {
-      this.logger.access('OPTIONS', 200, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), request.url);
-      response.end();
-      request.on('data', () => {
-        this.logger.debug('DATA RECEIVED AFTER END');
-        request.destroy();
-      });
+      this.logger.access('OPTIONS', 200, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), request.headers['user-agent'], request.url);
+      this._end(request, response, 200);
+      this.__checkReload();
       return;
     }
 
     let ctx = this._ContextFreeList.alloc(this, request, response);
-    
+
+    this.__connectionCount++;
+    let bound = (this.__connectionCount / this.__PCUBound) | 0;
+    if (this.__maxConnectionCount < bound) {
+      this.__maxConnectionCount = bound;
+      this.logger.info('[PCU] Meet peak concurrent connections new up', this.__connectionCount);
+    }
+
     let app = this;
     co(function*() {
       if (app.session) {
@@ -110,9 +169,11 @@ class SilenceApplication {
           ctx.error(500);
         }
       }
-      let identity = ctx._user && ctx._user._attrs ? (ctx._user._attrs.id || null) : null;
-      app.logger.access(ctx.method, ctx._code, ctx.duration, request.headers['content-length'] || 0, ctx._body.length, identity, util.getClientIp(request), request.url);
+      let identity = ctx._user ? ctx._user.id : null;
+      app.logger.access(ctx.method, ctx._code, ctx.duration, request.headers['content-length'] || 0, ctx._body.length, identity, util.getClientIp(request), request.headers['user-agent'], request.url);
       app._ContextFreeList.free(ctx);
+      app.__connectionCount--;
+      app.__checkReload();
     }
   }
 
@@ -141,7 +202,7 @@ class SilenceApplication {
     if (this.__cleanup) {
       return;
     }
-    console.log((cluster.isWorker ? `[${cluster.worker.id}] ` : '') + 'Clean up Silence JS and bye!');
+    console.log(`${process.title} Bye!`);
     this.__cleanup = true;
     this.logger.close();
     this.db && this.db.close();
@@ -160,8 +221,7 @@ class SilenceApplication {
         process.nextTick(() => {
           this._route.build();
           let server = http.createServer((request, response) => {
-            // this.handle(request, response);
-            response.end('OK');
+            this.handle(request, response);
           });
           server.on('error', reject);
           server.listen(port, host, resolve);
