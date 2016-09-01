@@ -14,7 +14,8 @@ const DEFAULT_HOST = '0.0.0.0';
 const http = require('http');
 const STATUS_CODES = http.STATUS_CODES;
 const NOT_FOUND_MESSAGE = `{\n  "code": 404,\n  "data": "${STATUS_CODES['404']}"\n}`;
-const NOT_AVALIABLE_MESSAGE = `{\n "code": 503,\n "data": "${STATUS_CODES['503']}"\n}`;
+const NOT_AVALIABLE_MESSAGE_1 = `{\n "code": 503,\n "data": "${STATUS_CODES['503']}, Server Reloading"\n}`;
+const NOT_AVALIABLE_MESSAGE_2 = `{\n "code": 503,\n "data": "${STATUS_CODES['503']}, Too Many Connections"\n}`;
 
 if (cluster.isWorker) {
   process.title = 'SILENCE_JS_WORKER_' + cluster.worker.id;
@@ -35,6 +36,7 @@ class SilenceApplication {
     this._ContextFreeList = new FreeList(config.ContextClass || SilenceContext, config.freeListSize);
 
 
+    this.__MAXAllowedPCU = config.maxAllowedPCU || 0xfffffff0;
     this.__PCUBound = config.PCUBound || 1000;
     this.__cleanup = false;
     this.__needReload = false;
@@ -81,6 +83,7 @@ class SilenceApplication {
   }
 
   _end(request, response, statusCode, text) {
+    this.__connectionCount--;
     response.writeHead(statusCode);
     response.end(text);
     // 如果还有更多的数据, 直接 destroy 掉。防止潜在的攻击。
@@ -94,7 +97,20 @@ class SilenceApplication {
   }
   handle(request, response) {
     if (this.__needReload) {
-      this._end(request, response, 503, NOT_AVALIABLE_MESSAGE);
+      this._end(request, response, 503, NOT_AVALIABLE_MESSAGE_1);
+      return;
+    }
+
+    this.__connectionCount++;
+    let bound = (this.__connectionCount / this.__PCUBound) | 0;
+    if (this.__maxConnectionCount < bound) {
+      this.__maxConnectionCount = bound;
+      this.logger.info('[PCU] Meet peak concurrent connections new up', this.__connectionCount);
+    }
+
+    if (this.__connectionCount > this.__MAXAllowedPCU) {
+      this._end(request, response, 503, NOT_AVALIABLE_MESSAGE_2);
+      this.logger.access(request.method, 503, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), request.headers['user-agent'], request.url);
       return;
     }
 
@@ -105,6 +121,7 @@ class SilenceApplication {
       this.__checkReload();
       return;
     }
+
     if (this.cors) {
       response.setHeader('Access-Control-Allow-Origin', this.cors);
       response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -117,13 +134,6 @@ class SilenceApplication {
     }
 
     let ctx = this._ContextFreeList.alloc(this, request, response);
-
-    this.__connectionCount++;
-    let bound = (this.__connectionCount / this.__PCUBound) | 0;
-    if (this.__maxConnectionCount < bound) {
-      this.__maxConnectionCount = bound;
-      this.logger.info('[PCU] Meet peak concurrent connections new up', this.__connectionCount);
-    }
 
     let app = this;
     co(function*() {
