@@ -136,6 +136,8 @@ class SilenceApplication {
     let ctx = this._ContextFreeList.alloc(this, request, response);
 
     let app = this;
+    let alreadyDestroy = false;
+
     co(function*() {
       if (app.session) {
         yield app.session.touch(ctx);
@@ -171,16 +173,39 @@ class SilenceApplication {
           ctx.error(404);
         }
       }
-      _destroy();
+      if (ctx.__parseState === 0) {
+        // console.log('final resume');
+        ctx.__parseOnEnd = _final;
+        ctx._originRequest.resume()
+      } else {
+        _final();
+      }
     }, _destroy).catch(_destroy);
     
     function _destroy(err) {
+      if (alreadyDestroy) {
+        return;
+      }
+      alreadyDestroy = true;
       if (err) {
         app.logger.error(err.stack || err.mssage || err.toString());
         if (!ctx.isSent) {
           ctx.error(500);
         }
       }
+      if (ctx.__parseState === 0) {
+        // console.log('final resume err');
+        ctx.__parseOnEnd = _final;
+        ctx._originRequest.resume()
+      } else {
+        _final();
+      }
+
+    }
+
+    function _final() {
+      alreadyDestroy = true;
+      ctx.finallySend();
       let identity = ctx._user ? ctx._user.id : null;
       app.logger.access(ctx.method, ctx._code, ctx.duration, request.headers['content-length'] || 0, ctx._body.length, identity, util.getClientIp(request), request.headers['user-agent'], request.url);
       app._ContextFreeList.free(ctx);

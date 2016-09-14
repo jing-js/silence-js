@@ -65,8 +65,8 @@ class SilenceContext {
     this.__initParse();
   }
   $$freeListFree() {
-    if (this.__parseState === 0) {
-      this._originRequest.resume();
+    if (this.__parseState !== 2) {
+      this._app.logger.error('Context request __parseState unexpected.');
     }
     if (this._user) {
       this._app.session.freeUser(this._user);
@@ -109,26 +109,39 @@ class SilenceContext {
       if (me.__parseState === 2) {
         return;
       }
+      me.__parseState = 2;
+      clear();
       if (err && err !== 'request_aborted') {
         me.logger.error(err);
-        req.pause();
+        req.destroy();
       }
-      me.__parseState = 2;
-      me.__parseOnEnd && me.__parseOnEnd(err);
+      if (me.__parseOnEnd) {
+        me.__parseOnEnd(err);
+        me.__parseOnEnd = null;
+      }
+    }
+    function clear() {
       req.removeListener('error', onEnd);
       req.removeListener('aborted', onAborted);
       req.removeListener('end', onEnd);
       req.removeListener('close', onEnd);
       req.removeListener('data', onData);
+      if (rateTM !== null) {
+        clearTimeout(rateTM);
+        rateTM = null;
+      }
     }
     function onAborted() {
-      // console.log('aborted')
+      // console.log('aborted');
+      req.destroy();
       onEnd('request_aborted');
     }
     function onData(chunk) {
-      // console.log('ctx inner on data', chunk.length)
+      // console.log('ctx inner on data', chunk.toString())
       if (me._isSent) {
         // console.log('destroy connection');
+        me._code = 400;
+        me.logger.error('Post data is not allowed:', me.url);
         req.destroy();
         onEnd();
         return;
@@ -137,18 +150,20 @@ class SilenceContext {
       if (me.__parseLimit > 0 && me.__parseBytes > me.__parseLimit) {
         // console.log('meet size too large', me.__parseBytes, me.__parseLimit);
         me.__parseOnEnd('size_too_large');
-        me.__parseState = 0;
+        me.__parseState = 2;
         me.__parseOnEnd = null;
-        req.pause();
+        req.destroy();
+        clear();
         return;
       }
       let err = me.__parseOnData(chunk);
       if (err) {
         // console.log('meet error', err);
         me.__parseOnEnd(err);
-        me.__parseState = 0;
+        me.__parseState = 2;
         me.__parseOnEnd = null;
-        req.pause();
+        req.destroy();
+        clear();
         return;
       }
       if (me.__parseRate > 0) {
@@ -158,9 +173,6 @@ class SilenceContext {
     function checkRate() {
       rateTM = null;
       let tm = Date.now()  - me.__parseTime;
-      // if (tm <= 10) {
-      //   return;
-      // }
       let should = me.__parseRate * tm;
       // console.log('check rate', tm, me.__parseBytes, should);
       if (me.__parseBytes > should) {
@@ -200,6 +212,7 @@ class SilenceContext {
     this.__parseRate = rate / 1000;
     this.__parseBytes = 0;
     this.__parseTime = Date.now();
+    // console.log('rrrrrsume    ....')
     this._originRequest.resume();
     this.__parseState = 1;
     return true;
@@ -289,6 +302,9 @@ class SilenceContext {
       data: data || ''
     }, null, '  ');
     this._isSent = true;
+  }
+  finallySend() {
+    let hc = this._code === 0 || this._code >= 1000 ? 200 : this._code;
     this._originResponse.writeHead(hc, {
       'Content-Type': 'application/json;charset=utf-8'
     });
