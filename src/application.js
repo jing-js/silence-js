@@ -12,16 +12,6 @@ const DEFAULT_PORT = 80;
 const DEFAULT_HOST = '0.0.0.0';
 
 const http = require('http');
-const STATUS_CODES = http.STATUS_CODES;
-const NOT_FOUND_MESSAGE = `{\n  "code": 404,\n  "data": "${STATUS_CODES['404']}"\n}`;
-const NOT_AVALIABLE_MESSAGE_1 = `{\n "code": 503,\n "data": "${STATUS_CODES['503']}, Server Reloading"\n}`;
-const NOT_AVALIABLE_MESSAGE_2 = `{\n "code": 503,\n "data": "${STATUS_CODES['503']}, Too Many Connections"\n}`;
-
-if (cluster.isWorker) {
-  process.title = 'SILENCE_JS_WORKER_' + cluster.worker.id;
-} else {
-  process.title = 'SILENCE_JS';
-}
 
 class SilenceApplication {
   constructor(config) {
@@ -31,6 +21,8 @@ class SilenceApplication {
     this.session = config.session;
     this.hash = config.hash;
     this.parser = config.parser;
+    this.mailers = config.mailers;
+    this.asset = config.asset;
     this._route = config.RouteManagerClass ? config.RouteManagerClass(config.logger) : new RouteManager(config.logger);
     this._CookieStoreFreeList = new FreeList(config.CookieStoreClass || CookieStore, config.freeListSize);
     this._ContextFreeList = new FreeList(config.ContextClass || SilenceContext, config.freeListSize);
@@ -82,10 +74,10 @@ class SilenceApplication {
     }
   }
 
-  _end(request, response, statusCode, text) {
+  _end(request, response, statusCode) {
     this.__connectionCount--;
     response.writeHead(statusCode);
-    response.end(text);
+    response.end();
     // 如果还有更多的数据, 直接 destroy 掉。防止潜在的攻击。
     // 大部份 web 服务器, 当 post 一个 404 的 url 时, 如果跟一个很大的文件, 也会让文件上传
     //  (虽然只是在内存中转瞬即逝, 但总还是浪费了带宽)
@@ -97,7 +89,7 @@ class SilenceApplication {
   }
   handle(request, response) {
     if (this.__needReload) {
-      this._end(request, response, 503, NOT_AVALIABLE_MESSAGE_1);
+      this._end(request, response, 503);
       return;
     }
 
@@ -109,14 +101,14 @@ class SilenceApplication {
     }
 
     if (this.__connectionCount > this.__MAXAllowedPCU) {
-      this._end(request, response, 503, NOT_AVALIABLE_MESSAGE_2);
-      this.logger.access(request.method, 503, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), request.headers['user-agent'], request.url);
+      this._end(request, response, 504);
+      this.__checkReload();
       return;
     }
 
     let handler = this._route.match(request.method, request.url, "OPTIONS_HANDLER");
     if (handler === null) {
-      this._end(request, response, 404, NOT_FOUND_MESSAGE);
+      this._end(request, response, 404);
       this.logger.access(request.method, 404, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), request.headers['user-agent'], request.url);
       this.__checkReload();
       return;
@@ -207,7 +199,7 @@ class SilenceApplication {
       alreadyDestroy = true;
       ctx.finallySend();
       let identity = ctx._user ? ctx._user.id : null;
-      app.logger.access(ctx.method, ctx._code, ctx.duration, request.headers['content-length'] || 0, ctx._body.length, identity, util.getClientIp(request), request.headers['user-agent'], request.url);
+      app.logger.access(ctx.method, ctx._code, ctx.duration, request.headers['content-length'] || 0, ctx._body ? ctx._body.length : 0, identity, util.getClientIp(request), request.headers['user-agent'], request.url);
       app._ContextFreeList.free(ctx);
       app.__connectionCount--;
       app.__checkReload();
@@ -245,6 +237,9 @@ class SilenceApplication {
     this.db && this.db.close();
     this.hash && this.hash.close();
     this.session && this.session.close();
+    for(let k in this.mailers) {
+      this.mailers[k].close();
+    }
     needExit && process.exit();
   }
 

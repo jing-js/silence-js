@@ -3,28 +3,9 @@
 const util = require('silence-js-util');
 const url = require('url');
 
-const STATUS = (function () {
-  let CODES = require('http').STATUS_CODES;
-  let map = new Map();
-  for(let k in CODES) {
-    map.set(parseInt(k), JSON.stringify({
-      code: parseInt(k),
-      data: CODES[k]
-    }, null, '  '));
-  }
-  return map;
-})();
-
-class RequestReader {
-  constructor(onData, onEnd) {
-    this.onData = onData;
-    this.onEnd = onEnd;
-    this.state = 'reading';
-  }
-  push(chunk) {
-    this.onData(chunk);
-  }
-}
+const RESPONSE_HEADERS = {
+  'Content-Type': 'application/json;charset=utf-8'
+};
 
 class SilenceContext {
   constructor() {
@@ -44,6 +25,7 @@ class SilenceContext {
     this._code = 0;
     this._isSent = false;
     this._body = null;
+    this._token = null;
     this._ip = null;
     this._duration = Date.now(); // duration of each request
     this.__parseState = 0; // 0: paused, 1: reading, 2: end
@@ -83,6 +65,7 @@ class SilenceContext {
     this._originRequest = null;
     this._originResponse = null;
     this._body = null;
+    this._token = null;
     this._query = null;
     this._post = null;
     this._multipart = null;
@@ -251,8 +234,6 @@ class SilenceContext {
   get cookie() {
     if (this._cookie === null) {
       this._cookie = this._app._CookieStoreFreeList.alloc(this);
-      console.trace();
-
     }
     return this._cookie;
   }
@@ -267,6 +248,12 @@ class SilenceContext {
   }
   get session() {
     return this._app.session;
+  }
+  get mailers() {
+    return this._app.mailers;
+  }
+  get asset() {
+    return this._app.asset;
   }
   get user() {
     if (!this._user) {
@@ -296,25 +283,22 @@ class SilenceContext {
       return;
     }
     this._code = code;
-    let hc = this._code === 0 || this._code >= 1000 ? 200 : this._code;
-    this._body = this._code !== 0 && this._code < 1000 && STATUS.has(hc) ? STATUS.get(hc) : JSON.stringify({
+    this._body = this._code !== 0 && this._code < 1000 ? null : JSON.stringify({
       code: this._code,
       data: data || ''
-    }, null, '  ');
+    });
     this._isSent = true;
   }
   finallySend() {
     let hc = this._code === 0 || this._code >= 1000 ? 200 : this._code;
-    this._originResponse.writeHead(hc, {
-      'Content-Type': 'application/json;charset=utf-8'
-    });
+    this._originResponse.writeHead(hc, this._app.session.getRespHeaders(this) || RESPONSE_HEADERS);
     this._originResponse.end(this._body);
   }
-  *login(identity, remember) {
-    this.user.assign(identity);
-    if (!this.user.sessionId) {
-      this.user.sessionId = yield util.genSessionKey();
+  *login(uid, remember) {
+    if (!this._user) {
+      this._user = this._app.session.createUser();
     }
+    this._user._uid = uid;
     return yield this._app.session.login(this, remember);
   }
   *logout() {
