@@ -23,6 +23,8 @@ class SilenceApplication {
     this.parser = config.parser;
     this.mailers = config.mailers;
     this.asset = config.asset;
+    this.passwordService = config.passwordService;
+    this.configParameters = config.parameters || {};
     this._route = config.RouteManagerClass ? config.RouteManagerClass(config.logger) : new RouteManager(config.logger);
     this._CookieStoreFreeList = new FreeList(config.CookieStoreClass || CookieStore, config.freeListSize);
     this._ContextFreeList = new FreeList(config.ContextClass || SilenceContext, config.freeListSize);
@@ -101,7 +103,7 @@ class SilenceApplication {
     }
 
     if (this.__connectionCount > this.__MAXAllowedPCU) {
-      this._end(request, response, 504);
+      this._end(request, response, 503);
       this.__checkReload();
       return;
     }
@@ -109,7 +111,7 @@ class SilenceApplication {
     let handler = this._route.match(request.method, request.url, "OPTIONS_HANDLER");
     if (handler === null) {
       this._end(request, response, 404);
-      this.logger.access(request.method, 404, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), request.headers['user-agent'], request.url);
+      this.logger.access(request.method, 404, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), util.getRemoteIp(request), request.headers['user-agent'], request.url);
       this.__checkReload();
       return;
     }
@@ -119,7 +121,7 @@ class SilenceApplication {
       response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (handler === 'OPTIONS_HANDLER') {
-      this.logger.access('OPTIONS', 200, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), request.headers['user-agent'], request.url);
+      this.logger.access('OPTIONS', 200, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), util.getRemoteIp(request), request.headers['user-agent'], request.url);
       this._end(request, response, 200);
       this.__checkReload();
       return;
@@ -199,7 +201,7 @@ class SilenceApplication {
       alreadyDestroy = true;
       ctx.finallySend();
       let identity = ctx._user ? ctx._user.id : null;
-      app.logger.access(ctx.method, ctx._code, ctx.duration, request.headers['content-length'] || 0, ctx._body ? ctx._body.length : 0, identity, util.getClientIp(request), request.headers['user-agent'], request.url);
+      app.logger.access(ctx.method, ctx._code, ctx.duration, request.headers['content-length'] || 0, ctx._body ? ctx._body.length : 0, identity, util.getClientIp(request), util.getRemoteIp(request), request.headers['user-agent'], request.url);
       app._ContextFreeList.free(ctx);
       app.__connectionCount--;
       app.__checkReload();

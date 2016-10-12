@@ -3,10 +3,6 @@
 const util = require('silence-js-util');
 const url = require('url');
 
-const RESPONSE_HEADERS = {
-  'Content-Type': 'application/json;charset=utf-8'
-};
-
 class SilenceContext {
   constructor() {
 
@@ -26,7 +22,6 @@ class SilenceContext {
     this._isSent = false;
     this._body = null;
     this._token = null;
-    this._ip = null;
     this._duration = Date.now(); // duration of each request
     this.__parseState = 0; // 0: paused, 1: reading, 2: end
     this.__parseBytes = 0;
@@ -69,7 +64,6 @@ class SilenceContext {
     this._query = null;
     this._post = null;
     this._multipart = null;
-    this._ip = null;
     this.__parseState = 0;
     this.__parseBytes = 0;
     this.__parseTime = 0;
@@ -200,7 +194,12 @@ class SilenceContext {
     this.__parseState = 1;
     return true;
   }
-  
+  now() {
+    return this._app.passwordService.now();
+  }
+  get config() {
+    return this._app.configParameters;
+  }
   get duration() {
     return Date.now() - this._duration;
   }
@@ -208,10 +207,13 @@ class SilenceContext {
     return this._originRequest.method;
   }
   get ip() {
-    if (this._ip === null) {
-      this._ip = util.getClientIp(this._originRequest);
-    }
-    return this._ip;
+    return this.util.getClientIp(this._originRequest) || util.getRemoteIp(this._originRequest);
+  }
+  get clientIp() {
+    return this.util.getClientIp(this._originRequest);
+  }
+  get remoteIp() {
+    return this.util.getRemoteIp(this._originRequest);
   }
   get headers() {
     return this._originRequest.headers;
@@ -283,15 +285,17 @@ class SilenceContext {
       return;
     }
     this._code = code;
-    this._body = this._code !== 0 && this._code < 1000 ? null : JSON.stringify({
+    this._body = this._code !== 0 && this._code < 1000 ? null : JSON.stringify(data ? {
       code: this._code,
-      data: data || ''
+      data: data
+    }: {
+      code: this._code
     });
     this._isSent = true;
   }
   finallySend() {
     let hc = this._code === 0 || this._code >= 1000 ? 200 : this._code;
-    this._originResponse.writeHead(hc, this._app.session.getRespHeaders(this) || RESPONSE_HEADERS);
+    this._originResponse.writeHead(hc);
     this._originResponse.end(this._body);
   }
   *login(uid, remember) {
