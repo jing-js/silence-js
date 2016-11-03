@@ -93,7 +93,7 @@ class Route {
         let c = url.charCodeAt(i);
         if (c !== p.code) {
           if (__pre_i === null) {
-            return null;
+            return undefined;
           } else {
             p = __pre_i.p;
             i = __pre_i.i;
@@ -111,7 +111,7 @@ class Route {
           break; // exit while
         } else {
           if (__pre_i === null) {
-            return null;
+            return undefined;
           } else {
             p = __pre_i.p;
             i = __pre_i.i;
@@ -122,7 +122,7 @@ class Route {
       }
       if (p.next === null) {
         if (__pre_i === null) {
-          return null;
+          return undefined;
         } else {
           p = __pre_i.p;
           i = __pre_i.i;
@@ -160,7 +160,7 @@ class Route {
             p = found;
           } else {
             if (__pre_i === null) {
-              return null;
+              return undefined;
             } else {
               p = __pre_i.p;
               i = __pre_i.i;

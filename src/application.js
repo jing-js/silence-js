@@ -10,7 +10,7 @@ const CookieStore = require('./cookie');
 const co = require('co');
 const DEFAULT_PORT = 80;
 const DEFAULT_HOST = '0.0.0.0';
-
+const OPTIONS_HANDLER = 'OPTIONS';
 const http = require('http');
 
 class SilenceApplication {
@@ -25,32 +25,26 @@ class SilenceApplication {
     this.asset = config.asset;
     this.passwordService = config.passwordService;
     this.configParameters = config.parameters || {};
-    this._route = config.RouteManagerClass ? config.RouteManagerClass(config.logger) : new RouteManager(config.logger);
+    this._route = config.router ? config.router : new RouteManager(config.logger);
     this._CookieStoreFreeList = new FreeList(config.CookieStoreClass || CookieStore, config.freeListSize);
     this._ContextFreeList = new FreeList(config.ContextClass || SilenceContext, config.freeListSize);
 
 
     this.__MAXAllowedPCU = config.maxAllowedPCU || 0xfffffff0;
-    this.__PCUBound = config.PCUBound || 1000;
     this.__cleanup = false;
     this.__needReload = false;
     this.__connectionCount = 0;
-    this.__maxConnectionCount = 0;
 
     process.on('uncaughtException', err => {
-      this.logger.error('UNCAUGHT EXCEPTION');
-      this.logger.error(err.stack || err.message || err.toString());
+      this.logger.serror('uncaught', err);
     });
 
     if (cluster.isWorker) {
       process.on('message', msg => {
-        if (msg === 'RELOAD') {
-          this.__needReload = true;
-          this.__checkReload();
+        if (msg === 'RELOAD' || msg === 'STOP') {
+          this._exit(true);
         } else if (msg === 'STATUS') {
           util.logStatus(this.__collectStatus());
-        } else if (msg === 'STOP') {
-          this._exit(true);
         }
       });
     }
@@ -58,8 +52,7 @@ class SilenceApplication {
       util.logStatus(this.__collectStatus());
     });
     process.on('SIGHUP', () => {
-      this.__needReload = true;
-      this.__checkReload();
+      this._exit(true);
     });
   }
 
@@ -69,15 +62,7 @@ class SilenceApplication {
     };
   }
 
-  __checkReload() {
-    if (this.__connectionCount === 0 && this.__needReload) {
-      this.logger.debug(process.title, 'exit for reload');
-      this._exit(true);
-    }
-  }
-
   _end(request, response, statusCode) {
-    this.__connectionCount--;
     response.writeHead(statusCode);
     response.end();
     // 如果还有更多的数据, 直接 destroy 掉。防止潜在的攻击。
@@ -90,29 +75,16 @@ class SilenceApplication {
     });
   }
   handle(request, response) {
-    if (this.__needReload) {
-      this._end(request, response, 503);
+  
+    if (this.__connectionCount + 1 > this.__MAXAllowedPCU) {
+      this._end(request, response, 503)
       return;
     }
 
-    this.__connectionCount++;
-    let bound = (this.__connectionCount / this.__PCUBound) | 0;
-    if (this.__maxConnectionCount < bound) {
-      this.__maxConnectionCount = bound;
-      this.logger.info('[PCU] Meet peak concurrent connections new up', this.__connectionCount);
-    }
-
-    if (this.__connectionCount > this.__MAXAllowedPCU) {
-      this._end(request, response, 503);
-      this.__checkReload();
-      return;
-    }
-
-    let handler = this._route.match(request.method, request.url, "OPTIONS_HANDLER");
-    if (handler === null) {
+    let handler = this._route.match(request.method, request.url, OPTIONS_HANDLER);
+    if (handler === undefined) {
       this._end(request, response, 404);
       this.logger.access(request.method, 404, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), util.getRemoteIp(request), request.headers['user-agent'], request.url);
-      this.__checkReload();
       return;
     }
 
@@ -120,31 +92,45 @@ class SilenceApplication {
       response.setHeader('Access-Control-Allow-Origin', this.cors);
       response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
-    if (handler === 'OPTIONS_HANDLER') {
-      this.logger.access('OPTIONS', 200, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), util.getRemoteIp(request), request.headers['user-agent'], request.url);
+    if (handler === OPTIONS_HANDLER) {
       this._end(request, response, 200);
-      this.__checkReload();
+      this.logger.access('OPTIONS', 200, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), util.getRemoteIp(request), request.headers['user-agent'], request.url);
       return;
     }
 
-    let ctx = this._ContextFreeList.alloc(this, request, response);
+    let ctx;
+    try {
+      ctx = this._ContextFreeList.alloc(this, request, response);
+    } catch(ex) {
+      // error here is almost impossible
+      this.logger.serror('application', ex);
+      this._end(request, response, 500);
+      return;
+    }
 
     let app = this;
-    let alreadyDestroy = false;
-
+    let __destroied = false;
+    let __final = false;
+    let __cleanup = false;
+    this.__connectionCount++;
     co(function*() {
       if (app.session) {
         yield app.session.touch(ctx);
-      }
-      for (let i = 0; i < handler.middlewares.length; i++) {
-        let fn = handler.middlewares[i];
-        if (util.isGenerateFunction(fn)) {
-          yield fn.apply(ctx, handler.params);
-        } else {
-          fn.apply(ctx, handler.params);
-        }
         if (ctx.isSent) {
           return;
+        }
+      }
+      if (handler.middlewares !== undefined) {
+        for (let i = 0; i < handler.middlewares.length; i++) {
+          let fn = handler.middlewares[i];
+          if (util.isGenerateFunction(fn)) {
+            yield fn.apply(ctx, handler.params);
+          } else {
+            fn.apply(ctx, handler.params);
+          }
+          if (ctx.isSent) {
+            return;
+          }
         }
       }
       if (util.isGenerateFunction(handler.fn)) {
@@ -152,7 +138,7 @@ class SilenceApplication {
       } else if (util.isFunction(handler.fn)) {
         return handler.fn.apply(ctx, handler.params);
       } else {
-        app.logger.error(`Handler is not function`);
+        app.logger.serror('application', `Handler is not function`);
       }
     }).then(res => {
       if (ctx._cookie && ctx._cookie._cookieToSend.length > 0) {
@@ -168,43 +154,49 @@ class SilenceApplication {
         }
       }
       if (ctx.__parseState === 0) {
-        // console.log('final resume');
         ctx.__parseOnEnd = _final;
         ctx._originRequest.resume()
       } else {
         _final();
       }
-    }, _destroy).catch(_destroy);
+    }).catch(_destroy).catch(err => {
+      if (__cleanup) return;
+      app.__connectionCount--;
+      __cleanup = true;
+      __final = true;
+      __destroied = true;
+    });
     
     function _destroy(err) {
-      if (alreadyDestroy) {
+      if (__destroied) {
         return;
       }
-      alreadyDestroy = true;
+      __destroied = true;
       if (err) {
-        app.logger.error(err.stack || err.mssage || err.toString());
+        app.logger.error(err);
         if (!ctx.isSent) {
           ctx.error(500);
         }
       }
       if (ctx.__parseState === 0) {
-        // console.log('final resume err');
         ctx.__parseOnEnd = _final;
-        ctx._originRequest.resume()
+        ctx._originRequest.resume();
       } else {
         _final();
       }
-
     }
 
     function _final() {
-      alreadyDestroy = true;
+      if (__final) {
+        return;
+      }
+      __final = true;
       ctx.finallySend();
       let identity = ctx._user ? ctx._user.id : null;
       app.logger.access(ctx.method, ctx._code, ctx.duration, request.headers['content-length'] || 0, ctx._body ? ctx._body.length : 0, identity, util.getClientIp(request), util.getRemoteIp(request), request.headers['user-agent'], request.url);
       app._ContextFreeList.free(ctx);
       app.__connectionCount--;
-      app.__checkReload();
+      __cleanup = true;
     }
   }
 
@@ -233,8 +225,8 @@ class SilenceApplication {
     if (this.__cleanup) {
       return;
     }
-    console.log(`${process.title} Bye!`);
     this.__cleanup = true;
+    this.logger.info(process.title, 'Bye!');
     this.logger.close();
     this.db && this.db.close();
     this.hash && this.hash.close();

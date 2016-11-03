@@ -43,7 +43,7 @@ class SilenceContext {
   }
   $$freeListFree() {
     if (this.__parseState !== 2) {
-      this._app.logger.error('Context request __parseState unexpected.');
+      this._app.logger.serror('context', '$$freeListFree: request __parseState unexpected');
     }
     if (this._user) {
       this._app.session.freeUser(this._user);
@@ -118,7 +118,6 @@ class SilenceContext {
       if (me._isSent) {
         // console.log('destroy connection');
         me._code = 400;
-        me.logger.error('Post data is not allowed:', me.url);
         req.destroy();
         onEnd();
         return;
@@ -193,9 +192,6 @@ class SilenceContext {
     this._originRequest.resume();
     this.__parseState = 1;
     return true;
-  }
-  now() {
-    return this._app.passwordService.now();
   }
   get config() {
     return this._app.configParameters;
@@ -274,14 +270,17 @@ class SilenceContext {
   }
   set body(val) {
     if (this._isSent) {
-      logger.error('Body can\'t be set after response sent!');
+      logger.serror('context', new Error('set body after response has been sent'));
       return;
     }
     this._body = val;
   }
+  setHeader(key, val) {
+    this._originResponse.setHeader(key, val);
+  }
   _send(code, data) {
     if (this._isSent) {
-      this.logger.error('Response can\'t be sent multi times!');
+      this.logger.serror('context', new Error('send body multi times'));
       return;
     }
     this._code = code;
@@ -298,12 +297,12 @@ class SilenceContext {
     this._originResponse.writeHead(hc);
     this._originResponse.end(this._body);
   }
-  *login(uid, remember) {
+  *login(uid, options) {
     if (!this._user) {
       this._user = this._app.session.createUser();
     }
     this._user._uid = uid;
-    return yield this._app.session.login(this, remember);
+    return yield this._app.session.login(this, options);
   }
   *logout() {
     return yield this._app.session.logout(this);
@@ -358,10 +357,8 @@ class SilenceContext {
           } else {
             resolve(res);
           }
-        }, err => {
-          this._error(err);
-          reject(err);
         }).catch(err => {
+          this._error(err);
           reject(err);
         });
       })
