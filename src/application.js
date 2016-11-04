@@ -75,7 +75,12 @@ class SilenceApplication {
     });
   }
   handle(request, response) {
-  
+    if (this.__cleanup) {
+      // already exited
+      this._end(request, response, 503);
+      return;
+    }
+
     if (this.__connectionCount + 1 > this.__MAXAllowedPCU) {
       this._end(request, response, 503)
       return;
@@ -201,47 +206,72 @@ class SilenceApplication {
   }
 
   initialize() {
-    return this.logger.init().then(msg => {
-      this.logger.debug(msg || 'logger got ready');
-      return Promise.all([
-        this.db ? this.db.init().then(msg => {
-          this.logger.debug(msg || 'database got ready.');
-        }) : Promise.resolve(),
-        this.session ? this.session.init().then(msg => {
-          this.logger.debug(msg || 'session got ready.');
-        }) : Promise.resolve(),
-        this.hash ? this.hash.init().then(msg => {
-          this.logger.debug(msg || 'password hash got ready.');
-        }) : Promise.resolve()
-      ]).then(() => {
-        process.on('exit', this._exit.bind(this, false));
-        process.on('SIGTERM', this._exit.bind(this, true));
-        process.on('SIGINT', this._exit.bind(this, true));
+    return this.logger.init().then(() => {
+      this.logger.sinfo('application', 'logger got ready');
+      return new Promise((resolve, reject) => {
+        let timeOuted = false;
+        let tm = setTimeout(() => {
+          timeOuted = true;
+          reject(new Error('application initialize timeout'));
+        }, 10000);
+        Promise.all([
+          this.db ? this.db.init().then(() => {
+            !timeOuted && this.logger.sinfo('application', 'database got ready.');
+          }) : Promise.resolve(),
+          this.session ? this.session.init().then(() => {
+            !timeOuted && this.logger.sinfo('application', 'session got ready.');
+          }) : Promise.resolve()
+        ]).then(() => {
+          if (timeOuted) {
+            return;
+          }
+          clearTimeout(tm);
+          process.on('exit', this._exit.bind(this, false));
+          process.on('SIGTERM', this._exit.bind(this, true));
+          process.on('SIGINT', this._exit.bind(this, true));
+          resolve();
+        }, err => {
+          clearTimeout(tm);
+          reject(err);
+        }).catch(err => {
+          console.log(err);
+          clearTimeout(tm);
+        });
       });
     });
   }
 
-  _exit(needExit) {
+  _exit(needExit, exitCode = 0) {
     if (this.__cleanup) {
       return;
     }
     this.__cleanup = true;
-    this.logger.info(process.title, 'Bye!');
-    this.logger.close();
-    this.db && this.db.close();
-    this.hash && this.hash.close();
-    this.session && this.session.close();
+    this.logger.sinfo('application', process.title, 'Bye!');
+
+    let arr = [ this.logger.close() ];
+    this.db && arr.push(this.db.close());
+    this.session && arr.push(this.session.close());
     for(let k in this.mailers) {
-      this.mailers[k].close();
+      arr.push(this.mailers[k].close());
     }
-    needExit && process.exit();
+    Promise.all(arr).then(() => {
+      needExit && process.exit(exitCode);
+    }).catch(ex => {
+      console.log(ex);
+      needExit && process.exit(1);
+    });
+  }
+
+  exit(err) {
+    err && this.logger.serror('application', err);
+    this._exit(true, 1);
   }
 
   listen(listenConfig) {
     let port = listenConfig.port || DEFAULT_PORT;
     let host = listenConfig.host || DEFAULT_HOST;
-    return this.initialize().then(() => {
-      return new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
+      this.initialize().then(() => {
         // nextTick 使得 listen 函数在路由定义之前调用,
         // 也仍然会在全部路由定义好之后才真正执行
         process.nextTick(() => {
@@ -252,7 +282,7 @@ class SilenceApplication {
           server.on('error', reject);
           server.listen(port, host, resolve);
         });
-      });
+      }, reject).catch(reject);
     });
   }
 
