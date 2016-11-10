@@ -108,7 +108,7 @@ class SilenceApplication {
       ctx = this._ContextFreeList.alloc(this, request, response);
     } catch(ex) {
       // error here is almost impossible
-      this.logger.serror('application', ex);
+      this.logger.serror('app', ex);
       this._end(request, response, 500);
       return;
     }
@@ -143,7 +143,7 @@ class SilenceApplication {
       } else if (util.isFunction(handler.fn)) {
         return handler.fn.apply(ctx, handler.params);
       } else {
-        app.logger.serror('application', `Handler is not function`);
+        app.logger.serror('app', `Handler is not function`);
       }
     }).then(res => {
       if (ctx._cookie && ctx._cookie._cookieToSend.length > 0) {
@@ -206,8 +206,13 @@ class SilenceApplication {
   }
 
   initialize() {
+
+    process.on('exit', this._exit.bind(this, false));
+    process.on('SIGTERM', this._exit.bind(this, true));
+    process.on('SIGINT', this._exit.bind(this, true));
+
     return this.logger.init().then(() => {
-      this.logger.sinfo('application', 'logger got ready');
+      this.logger.sinfo('app', 'logger got ready');
       return new Promise((resolve, reject) => {
         let timeOuted = false;
         let tm = setTimeout(() => {
@@ -216,19 +221,16 @@ class SilenceApplication {
         }, 10000);
         Promise.all([
           this.db ? this.db.init().then(() => {
-            !timeOuted && this.logger.sinfo('application', 'database got ready.');
+            !timeOuted && this.logger.sinfo('app', 'database got ready.');
           }) : Promise.resolve(),
           this.session ? this.session.init().then(() => {
-            !timeOuted && this.logger.sinfo('application', 'session got ready.');
+            !timeOuted && this.logger.sinfo('app', 'session got ready.');
           }) : Promise.resolve()
         ]).then(() => {
           if (timeOuted) {
             return;
           }
           clearTimeout(tm);
-          process.on('exit', this._exit.bind(this, false));
-          process.on('SIGTERM', this._exit.bind(this, true));
-          process.on('SIGINT', this._exit.bind(this, true));
           resolve();
         }, err => {
           clearTimeout(tm);
@@ -246,7 +248,7 @@ class SilenceApplication {
       return;
     }
     this.__cleanup = true;
-    this.logger.sinfo('application', process.title, 'Bye!');
+    this.logger.sinfo('app', process.title, 'Bye!');
 
     let arr = [ this.logger.close() ];
     this.db && arr.push(this.db.close());
@@ -263,7 +265,7 @@ class SilenceApplication {
   }
 
   exit(err) {
-    err && this.logger.serror('application', err);
+    err && this.logger.serror('app', err);
     this._exit(true, 1);
   }
 
@@ -271,6 +273,7 @@ class SilenceApplication {
     let port = listenConfig.port || DEFAULT_PORT;
     let host = listenConfig.host || DEFAULT_HOST;
     return new Promise((resolve, reject) => {
+      let __ret = false;
       this.initialize().then(() => {
         // nextTick 使得 listen 函数在路由定义之前调用,
         // 也仍然会在全部路由定义好之后才真正执行
@@ -279,8 +282,18 @@ class SilenceApplication {
           let server = http.createServer((request, response) => {
             this.handle(request, response);
           });
-          server.on('error', reject);
-          server.listen(port, host, resolve);
+          server.on('error', err => {
+            if (__ret) {
+              this.logger.serror('app', err);
+            } else {
+              __ret = true;
+              reject(err);
+            }
+          });
+          server.listen(port, host, () => {
+            __ret = true;
+            resolve();
+          });
         });
       }, reject).catch(reject);
     });
