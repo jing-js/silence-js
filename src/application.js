@@ -48,6 +48,10 @@ class SilenceApplication {
         }
       });
     }
+
+    process.on('SIGTERM', () => {
+      this._exit(true);
+    });
     process.on('SIGINFO', () => {
       util.logStatus(this.__collectStatus());
     });
@@ -58,7 +62,9 @@ class SilenceApplication {
 
   __collectStatus() {
     return {
-      connectionCount: this.__connectionCount
+      connections: this.__connectionCount,
+      db: this.db.__collectStatus(),
+      logger: this.logger.__collectStatus()
     };
   }
 
@@ -112,7 +118,7 @@ class SilenceApplication {
       this._end(request, response, 500);
       return;
     }
-
+    
     let app = this;
     let __destroied = false;
     let __final = false;
@@ -120,7 +126,7 @@ class SilenceApplication {
     this.__connectionCount++;
     co(function*() {
       if (app.session) {
-        yield app.session.touch(ctx);
+        yield app.session.touch(ctx, handler);
         if (ctx.isSent) {
           return;
         }
@@ -212,7 +218,7 @@ class SilenceApplication {
     process.on('SIGINT', this._exit.bind(this, true));
 
     return this.logger.init().then(() => {
-      this.logger.sinfo('app', 'logger got ready');
+      this.logger.sinfo('app', 'logger ready.');
       return new Promise((resolve, reject) => {
         let timeOuted = false;
         let tm = setTimeout(() => {
@@ -221,10 +227,10 @@ class SilenceApplication {
         }, 10000);
         Promise.all([
           this.db ? this.db.init().then(() => {
-            !timeOuted && this.logger.sinfo('app', 'database got ready.');
+            !timeOuted && this.logger.sinfo('app', 'db ready.');
           }) : Promise.resolve(),
           this.session ? this.session.init().then(() => {
-            !timeOuted && this.logger.sinfo('app', 'session got ready.');
+            !timeOuted && this.logger.sinfo('app', 'session ready.');
           }) : Promise.resolve()
         ]).then(() => {
           if (timeOuted) {
@@ -248,15 +254,39 @@ class SilenceApplication {
       return;
     }
     this.__cleanup = true;
-    this.logger.sinfo('app', process.title, 'Bye!');
+    let _closeWrap = (m, name) => {
+      return new Promise(res => {
+        m.close().then(() => {
+          this.logger.sinfo('app', name, 'closed.');
+          res();
+        }, err => {
+          this.logger.sinfo('app', name, 'closed with error', err.message);
+          res();
+        });
+      }).catch(ex => {
+        this.logger.serror('app', ex);
+      });
+    }
+    let arr = [];
+    this.db && arr.push(_closeWrap(this.db, 'db'));
+    this.session && arr.push(_closeWrap(this.session, 'session'));
 
-    let arr = [ this.logger.close() ];
-    this.db && arr.push(this.db.close());
-    this.session && arr.push(this.session.close());
     for(let k in this.mailers) {
       arr.push(this.mailers[k].close());
     }
     Promise.all(arr).then(() => {
+      this.logger.sinfo('app', process.title, 'Bye!');
+      return new Promise(res => {
+        this.logger.close().then(() => {   // finaly we close logger
+          console.log('logger closed.');   // as logger has been closed, we can only use console
+          res();
+        }, err => {
+          console.log('logger closed with error', err.message);
+          res();
+        });
+      });
+    }).then(() => {
+      console.log(process.title, 'process exit.');
       needExit && process.exit(exitCode);
     }).catch(ex => {
       console.log(ex);
