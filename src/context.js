@@ -293,7 +293,7 @@ class SilenceContext {
       return;
     }
     this._code = code;
-    this._body = this._code !== 0 && this._code < 1000 ? null : JSON.stringify(data ? {
+    this._body = this._code !== 0 && this._code < 1000 ? null : JSON.stringify(data !== undefined ? {
       code: this._code,
       data: data
     }: {
@@ -303,7 +303,9 @@ class SilenceContext {
   }
   finallySend() {
     let hc = this._code === 0 || this._code >= 1000 ? 200 : this._code;
-    this._originResponse.setHeader('Content-Type', this._type);
+    if (this._body) {
+      this._originResponse.setHeader('Content-Type', this._type);
+    }
     if (this._cookie && this._cookie._cookieToSend.length > 0) {
       this._originResponse.setHeader('Set-Cookie', this._cookie._cookieToSend);
     }
@@ -325,8 +327,6 @@ class SilenceContext {
       data = code;
       code = 1000;
     }
-    console.log('err');
-    console.trace();
     this._send(code, data);
   }
   success(data) {
