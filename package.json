@@ -17,7 +17,6 @@
   },
   "homepage": "https://github.com/jing-js/silence-js#readme",
   "dependencies": {
-    "co": "^4.6.0",
     "silence-js-util": "^1.0.0"
   }
 }
