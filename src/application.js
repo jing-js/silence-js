@@ -6,7 +6,6 @@ const cluster = require('cluster');
 const FreeList = util.FreeList;
 const RouteManager = require('./route');
 const CookieStore = require('./cookie');
-const co = require('co');
 const DEFAULT_PORT = 80;
 const DEFAULT_HOST = '0.0.0.0';
 const OPTIONS_HANDLER = 'OPTIONS';
