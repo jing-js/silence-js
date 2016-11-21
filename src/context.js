@@ -20,8 +20,8 @@ class SilenceContext {
     this._store = null;
     this._code = 0;
     this._isSent = false;
+    this._type = 'application/json; charset=utf-8';
     this._body = null;
-    this._token = null;
     this._duration = Date.now(); // duration of each request
     this.__parseState = 0; // 0: paused, 1: reading, 2: end
     this.__parseBytes = 0;
@@ -59,8 +59,8 @@ class SilenceContext {
     this._app = null;
     this._originRequest = null;
     this._originResponse = null;
+    this._type = 'application/json; charset=utf-8';
     this._body = null;
-    this._token = null;
     this._query = null;
     this._post = null;
     this._multipart = null;
@@ -90,7 +90,7 @@ class SilenceContext {
       clear();
       if (err && err !== 'request_aborted') {
         me.logger.error(err);
-        req.destroy();
+        process.nextTick(function() {req.destroy()});
       }
       if (me.__parseOnEnd) {
         me.__parseOnEnd(err);
@@ -110,25 +110,28 @@ class SilenceContext {
     }
     function onAborted() {
       // console.log('aborted');
-      req.destroy();
+      process.nextTick(function() {req.destroy()});
       onEnd('request_aborted');
     }
     function onData(chunk) {
+      // console.log('r', me.__parseRate, me.__parseLimit, me.__parseBytes)
       // console.log('ctx inner on data', chunk.toString())
       if (me._isSent) {
-        // console.log('destroy connection');
-        me._code = 400;
-        req.destroy();
+        if (me._code === 0) {
+          me._code = 406;
+          me._app.logger.swarn('app', 'unexpected request data');
+        }
+        process.nextTick(function() {req.destroy()});
         onEnd();
         return;
       }
       me.__parseBytes += chunk.length;
       if (me.__parseLimit > 0 && me.__parseBytes > me.__parseLimit) {
         // console.log('meet size too large', me.__parseBytes, me.__parseLimit);
-        me.__parseOnEnd('size_too_large');
+        me.__parseOnEnd(413);
         me.__parseState = 2;
         me.__parseOnEnd = null;
-        req.destroy();
+        process.nextTick(function() {req.destroy()});
         clear();
         return;
       }
@@ -138,7 +141,7 @@ class SilenceContext {
         me.__parseOnEnd(err);
         me.__parseState = 2;
         me.__parseOnEnd = null;
-        req.destroy();
+        process.nextTick(function() {req.destroy()});
         clear();
         return;
       }
@@ -265,6 +268,12 @@ class SilenceContext {
   get isSent() {
     return this._isSent;
   }
+  get contentType() {
+    return this._type;
+  }
+  set contentType(val) {
+    this._type = val;
+  }
   get body() {
     return this._body;
   }
@@ -294,74 +303,60 @@ class SilenceContext {
   }
   finallySend() {
     let hc = this._code === 0 || this._code >= 1000 ? 200 : this._code;
+    this._originResponse.setHeader('Content-Type', this._type);
+    if (this._cookie && this._cookie._cookieToSend.length > 0) {
+      this._originResponse.setHeader('Set-Cookie', this._cookie._cookieToSend);
+    }
     this._originResponse.writeHead(hc);
     this._originResponse.end(this._body);
   }
-  *login(uid, options) {
+  async login(uid, options) {
     if (!this._user) {
       this._user = this._app.session.createUser();
     }
     this._user._uid = uid;
-    return yield this._app.session.login(this, options);
+    return await this._app.session.login(this, options);
   }
-  *logout() {
-    return yield this._app.session.logout(this);
+  async logout() {
+    return await this._app.session.logout(this);
   }
   error(code, data) {
     if (!util.isNumber(code)) {
       data = code;
       code = 1000;
     }
+    console.log('err');
+    console.trace();
     this._send(code, data);
   }
   success(data) {
     this._send(0, data);
   }
-  _error(err) {
-    if (typeof err !== 'string') {
-      return;
-    }
-    if (err === 'size_too_large') {
-      this.error(413);
-    } else if (err.startsWith('header_') || err === 'parse_error' || err === 'request_aborted') {
-      this.error(400);
-    }
-  }
-  *post(options) {
+  async post(options) {
     if (this._post === null) {
-      this._post = yield new Promise((resolve, reject) => {
+      this._post = await new Promise((resolve, reject) => {
         this._app.parser.post(this, options).then(res => {
-          if (typeof res !== 'object') {
-            this.error(400);
-            reject('body_empty');
+          if (typeof res !== 'object' || res === null) {
+            reject(406);
           } else {
             resolve(res);
           }
-        }, err => {
-          this._error(err);
-          reject(err);
         }).catch(reject);
       });
-      // this.logger.debug('AFTER POST:')
-      // this.logger.debug(this._post);
     }
     return this._post;
   }
-  *multipart(options) {
+  async multipart(options) {
     if (this._multipart === null) {
-      this._multipart = yield new Promise((resolve, reject) => {
+      this._multipart = await new Promise((resolve, reject) => {
         this._app.parser.multipart(this, options).then(res => {
-          if (typeof res !== 'object') {
-            this.error(400);
-            reject('body_empty');
+          if (typeof res !== 'object' || res === null) {
+            reject(406);
           } else {
             resolve(res);
           }
-        }).catch(err => {
-          this._error(err);
-          reject(err);
-        });
-      })
+        }).catch(reject);
+      });
     }
     return this._multipart;
   }

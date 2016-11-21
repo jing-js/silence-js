@@ -1,6 +1,5 @@
 'use strict';
 
-const $util = require('util');
 const util = require('silence-js-util');
 const SilenceContext = require('./context');
 const cluster = require('cluster');
@@ -28,15 +27,19 @@ class SilenceApplication {
     this._route = config.router ? config.router : new RouteManager(config.logger);
     this._CookieStoreFreeList = new FreeList(config.CookieStoreClass || CookieStore, config.freeListSize);
     this._ContextFreeList = new FreeList(config.ContextClass || SilenceContext, config.freeListSize);
-
-
+    
     this.__MAXAllowedPCU = config.maxAllowedPCU || 0xfffffff0;
+    this.__MAXAllowedUrlLength = config.maxAllowedUrlLength || 1024;
+    this.__MAXUALength = config.maxAllowedUALength || 256;
     this.__cleanup = false;
-    this.__needReload = false;
     this.__connectionCount = 0;
 
     process.on('uncaughtException', err => {
-      this.logger.serror('uncaught', err);
+      try {
+        this.logger.serror('uncaught', err);
+      } catch(ex) {
+        // prevent uncaughtException dead loop.
+      }
     });
 
     if (cluster.isWorker) {
@@ -63,6 +66,11 @@ class SilenceApplication {
   __collectStatus() {
     return {
       connections: this.__connectionCount,
+      freeList: {
+        context: this._ContextFreeList.__collectStatus(),
+        cookie: this._CookieStoreFreeList.__collectStatus(),
+        sessionUser: this.session && this.session.userFreeList ? this.session.userFreeList.__collectStatus() : null
+      },
       db: this.db.__collectStatus(),
       logger: this.logger.__collectStatus()
     };
@@ -77,10 +85,40 @@ class SilenceApplication {
     // nginx 服务器对于 404 也不是立刻返回, 也会等待文件上传。 只不过 nginx 有默认的 max_body_size
     // 暂时不清楚是否可以更直观地判断, request 中是否还有待上传的内容。
     request.on('data', () => {
-      request.destroy();
+      this.logger.access(
+        request.method,
+        406,
+        1,
+        request.headers['content-length'] || 0,
+        0,
+        null,
+        util.getClientIp(request),
+        util.getRemoteIp(request),
+        statusCode === 460 ? request.headers['user-agent'].substr(0, this.__MAXUALength) : request.headers['user-agent'],
+        statusCode === 414 ? request.url.substr(0, this.__MAXAllowedUrlLength) : request.url
+      );
+      process.nextTick(function() {request.destroy()});
+      request.removeAllListeners('data');
+      request.removeAllListeners('end');
+    });
+    request.on('end', () => {
+      this.logger.access(
+        request.method,
+        statusCode,
+        1,
+        request.headers['content-length'] || 0,
+        0,
+        null,
+        util.getClientIp(request),
+        util.getRemoteIp(request),
+        statusCode === 460 ? request.headers['user-agent'].substr(0, this.__MAXUALength) : request.headers['user-agent'],
+        statusCode === 414 ? request.url.substr(0, this.__MAXAllowedUrlLength) : request.url
+      );
+      request.removeAllListeners('end');
+      request.removeAllListeners('data');
     });
   }
-  handle(request, response) {
+  async handle(request, response) {
     if (this.__cleanup) {
       // already exited
       this._end(request, response, 503);
@@ -88,14 +126,28 @@ class SilenceApplication {
     }
 
     if (this.__connectionCount + 1 > this.__MAXAllowedPCU) {
-      this._end(request, response, 503)
+      this._end(request, response, 503);
+      return;
+    }
+
+    response.setHeader('Access-Control-Allow-Origin', this.cors);
+    response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (request.method === 'OPTIONS') {
+      response.end();
+      return;
+    }
+    if (request.url.length > this.__MAXAllowedUrlLength) {
+      this._end(request, response, 414);
+      return;
+    }
+    if (request.headers['user-agent'] && request.headers['user-agent'].length > this.__MAXUALength) {
+      this._end(request, response, 460);
       return;
     }
 
     let handler = this._route.match(request.method, request.url, OPTIONS_HANDLER);
     if (handler === undefined) {
       this._end(request, response, 404);
-      this.logger.access(request.method, 404, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), util.getRemoteIp(request), request.headers['user-agent'], request.url);
       return;
     }
 
@@ -105,58 +157,17 @@ class SilenceApplication {
     }
     if (handler === OPTIONS_HANDLER) {
       this._end(request, response, 200);
-      this.logger.access('OPTIONS', 200, 1, request.headers['content-length'] || 0, 0, null, util.getClientIp(request), util.getRemoteIp(request), request.headers['user-agent'], request.url);
       return;
     }
 
-    let ctx;
-    try {
-      ctx = this._ContextFreeList.alloc(this, request, response);
-    } catch(ex) {
-      // error here is almost impossible
-      this.logger.serror('app', ex);
-      this._end(request, response, 500);
-      return;
-    }
-    
+    let ctx = this._ContextFreeList.alloc(this, request, response);
     let app = this;
-    let __destroied = false;
     let __final = false;
-    let __cleanup = false;
     this.__connectionCount++;
-    co(function*() {
-      if (app.session) {
-        yield app.session.touch(ctx, handler);
-        if (ctx.isSent) {
-          return;
-        }
-      }
-      if (handler.middlewares !== undefined) {
-        for (let i = 0; i < handler.middlewares.length; i++) {
-          let fn = handler.middlewares[i];
-          if (util.isGenerateFunction(fn)) {
-            yield fn.apply(ctx, handler.params);
-          } else {
-            fn.apply(ctx, handler.params);
-          }
-          if (ctx.isSent) {
-            return;
-          }
-        }
-      }
-      if (util.isGenerateFunction(handler.fn)) {
-        return yield handler.fn.apply(ctx, handler.params);
-      } else if (util.isFunction(handler.fn)) {
-        return handler.fn.apply(ctx, handler.params);
-      } else {
-        app.logger.serror('app', `Handler is not function`);
-      }
-    }).then(res => {
-      if (ctx._cookie && ctx._cookie._cookieToSend.length > 0) {
-        response.setHeader('Set-Cookie', ctx.cookie._cookieToSend);
-      }
+    try {
+      let res = await this.__run(ctx, handler);
       if (!ctx.isSent) {
-        if (!util.isUndefined(res)) {
+        if (res !== undefined) {
           ctx.success(res);
         } else if (ctx._body !== null) {
           ctx.success(ctx._body);
@@ -170,47 +181,71 @@ class SilenceApplication {
       } else {
         _final();
       }
-    }).catch(_destroy).catch(err => {
-      if (__cleanup) return;
-      app.__connectionCount--;
-      __cleanup = true;
-      __final = true;
-      __destroied = true;
-    });
-    
-    function _destroy(err) {
-      if (__destroied) {
-        return;
-      }
-      __destroied = true;
-      if (err) {
-        app.logger.error(err);
+    } catch(ex1) {
+      try { // 'try' here to ensure _final called
         if (!ctx.isSent) {
-          ctx.error(500);
+          ctx.error(typeof ex1 === 'number' ? ex1 : 500);
         }
-      }
-      if (ctx.__parseState === 0) {
-        ctx.__parseOnEnd = _final;
-        ctx._originRequest.resume();
-      } else {
+        if (ctx.__parseState === 0) {
+          ctx.__parseOnEnd = _final;
+          ctx._originRequest.resume();
+        } else {
+          _final();
+        }
+        if (typeof ex1 !== 'number') {
+          app.logger.serror('app', ex1);
+        } else {
+          app.logger.sdebug('app', 'catch error code', ex1);
+        }
+      } catch(ex3) {
         _final();
+        app.logger.serror('app', ex3);
       }
     }
 
     function _final() {
-      if (__final) {
-        return;
-      }
+      if (__final) return;
       __final = true;
-      ctx.finallySend();
-      let identity = ctx._user ? ctx._user.id : null;
-      app.logger.access(ctx.method, ctx._code, ctx.duration, request.headers['content-length'] || 0, ctx._body ? ctx._body.length : 0, identity, util.getClientIp(request), util.getRemoteIp(request), request.headers['user-agent'], request.url);
-      app._ContextFreeList.free(ctx);
-      app.__connectionCount--;
-      __cleanup = true;
+      try {
+        ctx.finallySend();
+        let identity = ctx._user ? ctx._user.id : null;
+        app.logger.access(ctx.method, ctx._code, ctx.duration, request.headers['content-length'] || 0, ctx._body ? ctx._body.length : 0, identity, util.getClientIp(request), util.getRemoteIp(request), request.headers['user-agent'], request.url);
+      } catch(ex) {
+        // ignore almost impossible exception
+      }
+      try {
+        // we must try our best to ensure bellow code execute whenever any error occurs
+        // because __connectionCount must be minus to accept new connection
+        app.__connectionCount--;
+        app._ContextFreeList.free(ctx);
+      } catch(ex) {
+        // ignore almost impossible exception
+      }
+      if (response.finished === false) {
+        // here will almost impossible be execute
+        response.end();
+      }
     }
+
   }
 
+  async __run(ctx, handler) {
+    if (this.session) {
+      await this.session.touch(ctx, handler);
+      if (ctx.isSent) {
+        return;
+      }
+    }
+    if (handler.middlewares !== undefined) {
+      for (let i = 0; i < handler.middlewares.length; i++) {
+        await handler.middlewares[i].apply(ctx, handler.params);
+        if (ctx.isSent) {
+          return;
+        }
+      }
+    }
+    return await handler.fn.apply(ctx, handler.params);
+  }
   initialize() {
 
     process.on('exit', this._exit.bind(this, false));
@@ -266,7 +301,7 @@ class SilenceApplication {
       }).catch(ex => {
         this.logger.serror('app', ex);
       });
-    }
+    };
     let arr = [];
     this.db && arr.push(_closeWrap(this.db, 'db'));
     this.session && arr.push(_closeWrap(this.session, 'session'));
@@ -309,8 +344,19 @@ class SilenceApplication {
         // 也仍然会在全部路由定义好之后才真正执行
         process.nextTick(() => {
           this._route.build();
+          this.__MAXAllowedUrlLength = Math.min(this.__MAXAllowedUrlLength, this._route.maxURLLength);
           let server = http.createServer((request, response) => {
-            this.handle(request, response);
+            this.handle(request, response).catch(ex => {
+              try {
+                if (response.finished === false) {
+                  response.writeHead(500);
+                  response.end();
+                }
+                this.logger.serror('app', ex);
+              } catch(ex) {
+                // unhandled exception will cause node process exit, so we catch it.
+              }
+            });
           });
           server.on('error', err => {
             if (__ret) {

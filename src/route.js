@@ -326,6 +326,9 @@ class RouteManager extends RouteDefine {
     // console.log(this.tree);
     // console.log(this.tree.match('GET', '/login'));
   }
+  get maxURLLength() {
+    return Infinity;
+  }
 }
 
 function printTree(tree) {
