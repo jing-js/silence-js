@@ -15,7 +15,7 @@ class SilenceContext {
     this._query = null;
     this._post = null;
     this._multipart = null;
-    this._user = null;
+    this._uid = null;
     this._cookie = null;
     this._store = null;
     this._code = 0;
@@ -45,10 +45,6 @@ class SilenceContext {
     if (this.__parseState !== 2) {
       this._app.logger.serror('context', '$$freeListFree: request __parseState unexpected');
     }
-    if (this._user) {
-      this._app.session.freeUser(this._user);
-      this._user = null;
-    }
     if (this._cookie) {
       this._app._CookieStoreFreeList.free(this._cookie);
       this._cookie = null;
@@ -61,6 +57,7 @@ class SilenceContext {
     this._originResponse = null;
     this._type = 'application/json; charset=utf-8';
     this._body = null;
+    this._uid = null;
     this._query = null;
     this._post = null;
     this._multipart = null;
@@ -256,14 +253,11 @@ class SilenceContext {
   get asset() {
     return this._app.asset;
   }
-  get user() {
-    if (!this._user) {
-      this._user = this._app.session.createUser();
-    }
-    return this._user;
-  }
   get isLogin() {
-    return this._user !== null && this._user.isLogin;
+    return this._uid !== null;
+  }
+  get userId() {
+    return this._uid;
   }
   get isSent() {
     return this._isSent;
@@ -313,13 +307,11 @@ class SilenceContext {
     this._originResponse.end(this._body);
   }
   async login(uid, options) {
-    if (!this._user) {
-      this._user = this._app.session.createUser();
-    }
-    this._user._uid = uid;
+    this._uid = uid;
     return await this._app.session.login(this, options);
   }
   async logout() {
+    this._uid = null;
     return await this._app.session.logout(this);
   }
   error(code, data) {

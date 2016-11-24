@@ -47,6 +47,10 @@ class SilenceApplication {
           this._exit(true);
         } else if (msg === 'STATUS') {
           util.logStatus(this.__collectStatus());
+        } else if (msg.startsWith('PASSWORD:')) {
+          this.session && this.session.onUpdatePassword(msg);
+        } else if (msg.startsWith('TOKEN:')) {
+          this.session && this.session.onUpdateToken(msg);
         }
       });
     }
@@ -67,11 +71,11 @@ class SilenceApplication {
       connections: this.__connectionCount,
       freeList: {
         context: this._ContextFreeList.__collectStatus(),
-        cookie: this._CookieStoreFreeList.__collectStatus(),
-        sessionUser: this.session && this.session.userFreeList ? this.session.userFreeList.__collectStatus() : null
+        cookie: this._CookieStoreFreeList.__collectStatus()
       },
-      db: this.db.__collectStatus(),
-      logger: this.logger.__collectStatus()
+      db: this.db ? this.db.__collectStatus() : null,
+      logger: this.logger.__collectStatus(),
+      session: this.session ? this.session.__collectStatus() : null
     };
   }
 
