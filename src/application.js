@@ -211,8 +211,7 @@ class SilenceApplication {
       __final = true;
       try {
         ctx.finallySend();
-        let identity = ctx._user ? ctx._user.id : null;
-        app.logger.access(ctx.method, ctx._code, ctx.duration, request.headers['content-length'] || 0, ctx._body ? ctx._body.length : 0, identity, util.getClientIp(request), util.getRemoteIp(request), request.headers['user-agent'], request.url);
+        app.logger.access(ctx.method, ctx._code, ctx.duration, request.headers['content-length'] || 0, ctx._body ? ctx._body.length : 0, ctx.accessId, util.getClientIp(request), util.getRemoteIp(request), request.headers['user-agent'], request.url);
       } catch(ex) {
         // ignore almost impossible exception
       }

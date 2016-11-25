@@ -256,7 +256,13 @@ class SilenceContext {
   get isLogin() {
     return this._uid !== null;
   }
-  get userId() {
+  get uid() {
+    return this._uid;
+  }
+  set uid(val) {
+    this._uid = val;
+  }
+  get accessId() {
     return this._uid;
   }
   get isSent() {
@@ -305,10 +311,6 @@ class SilenceContext {
     }
     this._originResponse.writeHead(hc);
     this._originResponse.end(this._body);
-  }
-  async login(uid, options) {
-    this._uid = uid;
-    return await this._app.session.login(this, options);
   }
   async logout() {
     this._uid = null;
