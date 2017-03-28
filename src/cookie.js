@@ -1,17 +1,12 @@
 'use strict';
 
-const util = require('silence-js-util');
-
+const EMPTY = Object.create(null);
 
 function parseCookieStr(name, val, options) {
   let str = `${name}=${encodeURIComponent(val)}`;
-  util.isNumber(options.maxAge) && (str += '; Max-Age=' + options.maxAge);
+  options.maxAge && (str += '; Max-Age=' + options.maxAge);
   options.domain && (str += '; Domain=' + options.domain);
   options.path && (str += '; Path=' + options.path);
-  if (options.expires) {
-    let date = options.expires instanceof Date ? options.expires : new Date(options.expires);
-    str += '; Expires=' + date.toUTCString();
-  }
   options.httpOnly !== false && (str += '; HttpOnly');
   options.secure && (str += '; Secure');
 
@@ -96,7 +91,7 @@ class CookieStore {
     }
     return this._cookie.substring(p0, p1 < 0 ? this._cookie.length : p1);
   }
-  set(name, val, options = {}) {
+  set(name, val, options = EMPTY) {
     this._cookieToSend.push(parseCookieStr(name, val, options));
   }
 }

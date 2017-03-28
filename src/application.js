@@ -22,7 +22,7 @@ class SilenceApplication {
     this.mailers = config.mailers;
     this.asset = config.asset;
     this.passwordService = config.passwordService;
-    this.configParameters = config.parameters || {};
+    this.ENV = config.ENV || {};
     this._route = config.router ? config.router : new RouteManager(config.logger);
     this._CookieStoreFreeList = new FreeList(config.CookieStoreClass || CookieStore, config.freeListSize);
     this._ContextFreeList = new FreeList(config.ContextClass || SilenceContext, config.freeListSize);
@@ -133,12 +133,11 @@ class SilenceApplication {
       return;
     }
 
-    response.setHeader('Access-Control-Allow-Origin', this.cors);
-    response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    if (request.method === 'OPTIONS') {
-      response.end();
-      return;
+    if (this.cors !== false) {
+      response.setHeader('Access-Control-Allow-Origin', this.cors);
+      response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
+
     if (request.url.length > this.__MAXAllowedUrlLength) {
       this._end(request, response, 414);
       return;
@@ -152,13 +151,7 @@ class SilenceApplication {
     if (handler === undefined) {
       this._end(request, response, 404);
       return;
-    }
-
-    if (this.cors) {
-      response.setHeader('Access-Control-Allow-Origin', this.cors);
-      response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    }
-    if (handler === OPTIONS_HANDLER) {
+    } else if (handler === OPTIONS_HANDLER) {
       this._end(request, response, 200);
       return;
     }

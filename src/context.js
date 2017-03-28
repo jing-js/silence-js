@@ -193,8 +193,8 @@ class SilenceContext {
     this.__parseState = 1;
     return true;
   }
-  get config() {
-    return this._app.configParameters;
+  get ENV() {
+    return this._app.ENV;
   }
   get duration() {
     return Date.now() - this._duration;
