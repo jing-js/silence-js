@@ -16,6 +16,7 @@ class SilenceContext {
     this._post = null;
     this._multipart = null;
     this._uid = null;
+    this._urole = null;
     this._cookie = null;
     this._store = null;
     this._code = 0;
@@ -256,11 +257,17 @@ class SilenceContext {
   get isLogin() {
     return this._uid !== null;
   }
-  get uid() {
+  get userId() {
     return this._uid;
   }
-  set uid(val) {
+  set userId(val) {
     this._uid = val;
+  }
+  get userRole() {
+    return this._urole;
+  }
+  set userRole(val) {
+    this._urole = val;
   }
   get accessId() {
     return this._uid;
