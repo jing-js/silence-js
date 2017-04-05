@@ -10,11 +10,14 @@ const DEFAULT_PORT = 80;
 const DEFAULT_HOST = '0.0.0.0';
 const OPTIONS_HANDLER = 'OPTIONS';
 const http = require('http');
+const https = require('https');
 
 class SilenceApplication {
   constructor(config) {
-    this.cors = config.cors || false;
     this.logger = config.logger;
+    this._WebSocketServer = config.ws ? config.ws.ServerClass : null;
+    this._WebSocketManager = config.ws ? config.ws.ManagerClass : null;
+    this.ws = null;
     this.db = config.db;
     this.session = config.session;
     this.hash = config.hash;
@@ -22,6 +25,7 @@ class SilenceApplication {
     this.mailers = config.mailers;
     this.asset = config.asset;
     this.passwordService = config.passwordService;
+    this._httpsOptions = config.httpsOptions || null;
     this.ENV = config.ENV || {};
     this._route = config.router ? config.router : new RouteManager(config.logger);
     this._CookieStoreFreeList = new FreeList(config.CookieStoreClass || CookieStore, config.freeListSize);
@@ -128,14 +132,20 @@ class SilenceApplication {
       return;
     }
 
+    if (this.ENV.CORS_ALLOW_ORIGIN && request.headers['origin'] !== this.ENV.CORS_ALLOW_ORIGIN) {
+      this._end(request, response, 600);
+      return;
+    }
+
     if (this.__connectionCount + 1 > this.__MAXAllowedPCU) {
       this._end(request, response, 503);
       return;
     }
 
-    if (this.cors !== false) {
-      response.setHeader('Access-Control-Allow-Origin', this.cors);
-      response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (this.ENV.CORS_ALLOW_ORIGIN) {
+      response.setHeader('Access-Control-Allow-Origin', this.ENV.CORS_ALLOW_ORIGIN);
+      response.setHeader('Access-Control-Allow-Credentials', true);
+      response.setHeader('Access-Control-Allow-Headers', this.ENV.CORS_ALLOW_CONTENT_TYPE || 'Content-Type');
     }
 
     if (request.url.length > this.__MAXAllowedUrlLength) {
@@ -340,7 +350,7 @@ class SilenceApplication {
         process.nextTick(() => {
           this._route.build();
           this.__MAXAllowedUrlLength = Math.min(this.__MAXAllowedUrlLength, this._route.maxURLLength);
-          let server = http.createServer((request, response) => {
+          let _httpHandler = (request, response) => {
             this.handle(request, response).catch(ex => {
               try {
                 if (response.finished === false) {
@@ -352,7 +362,12 @@ class SilenceApplication {
                 // unhandled exception will cause node process exit, so we catch it.
               }
             });
-          });
+          };
+
+          let server = this._httpsOptions
+            ? https.createServer(this._httpsOptions, _httpHandler)
+            : http.createServer(_httpHandler);
+
           server.on('error', err => {
             if (__ret) {
               this.logger.serror('app', err);
@@ -363,10 +378,20 @@ class SilenceApplication {
           });
           server.listen(port, host, () => {
             __ret = true;
+            this._initWS(server);
             resolve();
           });
         });
       }, reject).catch(reject);
+    });
+  }
+
+  _initWS(server) {
+    if (!this._WebSocketServer || !this._WebSocketManager) return;
+    this.ws = new this._WebSocketManager({
+      server: new this._WebSocketServer({ server }),
+      logger: this.logger,
+      CORS_ALLOW_ORIGIN: this.ENV.CORS_ALLOW_ORIGIN || null
     });
   }
 

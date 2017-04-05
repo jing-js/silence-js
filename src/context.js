@@ -17,6 +17,7 @@ class SilenceContext {
     this._multipart = null;
     this._uid = null;
     this._urole = null;
+    this._usession = null;
     this._cookie = null;
     this._store = null;
     this._code = 0;
@@ -59,6 +60,8 @@ class SilenceContext {
     this._type = 'application/json; charset=utf-8';
     this._body = null;
     this._uid = null;
+    this._urole = null;
+    this._usession = null;
     this._query = null;
     this._post = null;
     this._multipart = null;
@@ -239,6 +242,9 @@ class SilenceContext {
   get logger() {
     return this._app.logger;
   }
+  get ws() {
+    return this._app.ws;
+  }
   get db() {
     return this._app.db;
   }
@@ -256,6 +262,12 @@ class SilenceContext {
   }
   get isLogin() {
     return this._uid !== null;
+  }
+  get userSession() {
+    return this._usession;
+  }
+  set userSession(val) {
+    this._usession = val;
   }
   get userId() {
     return this._uid;
