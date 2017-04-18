@@ -26,16 +26,13 @@ class SilenceApplication {
     this.asset = config.asset;
     this.passwordService = config.passwordService;
     this._httpsOptions = config.httpsOptions || null;
+    this._noAccessLog = config.noAccessLog !== false;
     this.ENV = config.ENV || {};
     this._route = config.router ? config.router : new RouteManager(config.logger);
     this._CookieStoreFreeList = new FreeList(config.CookieStoreClass || CookieStore, config.freeListSize);
     this._ContextFreeList = new FreeList(config.ContextClass || SilenceContext, config.freeListSize);
     
-    this.__MAXAllowedPCU = config.maxAllowedPCU || 0xfffffff0;
-    this.__MAXAllowedUrlLength = config.maxAllowedUrlLength || 1024;
-    this.__MAXUALength = config.maxAllowedUALength || 256;
     this.__cleanup = false;
-    this.__connectionCount = 0;
 
     process.on('uncaughtException', err => {
       try {
@@ -72,7 +69,6 @@ class SilenceApplication {
 
   __collectStatus() {
     return {
-      connections: this.__connectionCount,
       freeList: {
         context: this._ContextFreeList.__collectStatus(),
         cookie: this._CookieStoreFreeList.__collectStatus()
@@ -92,7 +88,7 @@ class SilenceApplication {
     // nginx 服务器对于 404 也不是立刻返回, 也会等待文件上传。 只不过 nginx 有默认的 max_body_size
     // 暂时不清楚是否可以更直观地判断, request 中是否还有待上传的内容。
     request.on('data', () => {
-      this.logger.access(
+      this._noAccessLog === false && this.logger.access(
         request.method,
         406,
         1,
@@ -109,7 +105,7 @@ class SilenceApplication {
       request.removeAllListeners('end');
     });
     request.on('end', () => {
-      this.logger.access(
+      this._noAccessLog === false && this.logger.access(
         request.method,
         statusCode,
         1,
@@ -132,31 +128,6 @@ class SilenceApplication {
       return;
     }
 
-    if (this.ENV.CORS_ALLOW_ORIGIN && request.headers['origin'] !== this.ENV.CORS_ALLOW_ORIGIN) {
-      this._end(request, response, 600);
-      return;
-    }
-
-    if (this.__connectionCount + 1 > this.__MAXAllowedPCU) {
-      this._end(request, response, 503);
-      return;
-    }
-
-    if (this.ENV.CORS_ALLOW_ORIGIN) {
-      response.setHeader('Access-Control-Allow-Origin', this.ENV.CORS_ALLOW_ORIGIN);
-      response.setHeader('Access-Control-Allow-Credentials', true);
-      response.setHeader('Access-Control-Allow-Headers', this.ENV.CORS_ALLOW_CONTENT_TYPE || 'Content-Type');
-    }
-
-    if (request.url.length > this.__MAXAllowedUrlLength) {
-      this._end(request, response, 414);
-      return;
-    }
-    if (request.headers['user-agent'] && request.headers['user-agent'].length > this.__MAXUALength) {
-      this._end(request, response, 460);
-      return;
-    }
-
     let handler = this._route.match(request.method, request.url, OPTIONS_HANDLER);
     if (handler === undefined) {
       this._end(request, response, 404);
@@ -169,7 +140,6 @@ class SilenceApplication {
     let ctx = this._ContextFreeList.alloc(this, request, response);
     let app = this;
     let __final = false;
-    this.__connectionCount++;
     try {
       let res = await this.__run(ctx, handler);
       if (!ctx.isSent) {
@@ -214,17 +184,11 @@ class SilenceApplication {
       __final = true;
       try {
         ctx.finallySend();
-        app.logger.access(ctx.method, ctx._code, ctx.duration, request.headers['content-length'] || 0, ctx._body ? ctx._body.length : 0, ctx.accessId, util.getClientIp(request), util.getRemoteIp(request), request.headers['user-agent'], request.url);
-      } catch(ex) {
-        // ignore almost impossible exception
-      }
-      try {
-        // we must try our best to ensure bellow code execute whenever any error occurs
-        // because __connectionCount must be minus to accept new connection
-        app.__connectionCount--;
+        app._noAccessLog === false && app.logger.access(ctx.method, ctx._code, ctx.duration, request.headers['content-length'] || 0, ctx._body ? ctx._body.length : 0, ctx.accessId, util.getClientIp(request), util.getRemoteIp(request), request.headers['user-agent'], request.url);
         app._ContextFreeList.free(ctx);
       } catch(ex) {
         // ignore almost impossible exception
+        app.logger.serror('app', ex);
       }
       if (response.finished === false) {
         // here will almost impossible be execute
