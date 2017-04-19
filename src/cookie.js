@@ -9,21 +9,7 @@ function parseCookieStr(name, val, options) {
   options.path && (str += '; Path=' + options.path);
   options.httpOnly !== false && (str += '; HttpOnly');
   options.secure && (str += '; Secure');
-
-  if (options.sameSite) {
-    switch (options) {
-      case true:
-        str += '; SameSite=Strict';
-        break;
-      case 'lax':
-        str += '; SameSite=Lax';
-        break;
-      case 'strict':
-        str += '; SameSite=Strict';
-        break;
-    }
-  }
-
+  options.sameSite && (str += '; SameSite=Strict');
   return str;
 }
 
