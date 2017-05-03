@@ -4,14 +4,10 @@ const util = require('silence-js-util');
 const url = require('url');
 
 class SilenceContext {
-  constructor() {
-
-    this.$$freeListPosition = -1;
-    this.$$freeListNext = -1;
-
-    this._app = null;
-    this._originRequest = null;
-    this._originResponse = null;
+  constructor(app, request, response) {
+    this._app = app;
+    this._originRequest = request;
+    this._originResponse = response;
     this._query = null;
     this._post = null;
     this._multipart = null;
@@ -22,9 +18,9 @@ class SilenceContext {
     this._store = null;
     this._code = 0;
     this._isSent = false;
+    this._finalSent = false;
     this._type = 'application/json; charset=utf-8';
     this._body = null;
-    this._duration = Date.now(); // duration of each request
     this.__parseState = 0; // 0: paused, 1: reading, 2: end
     this.__parseBytes = 0;
     this.__parseTime = 0;
@@ -32,32 +28,17 @@ class SilenceContext {
     this.__parseLimit = 0;
     this.__parseOnData = null;
     this.__parseOnEnd = null;
-    
-  }
-  $$freeListInit(app, request, response) {
-    this._app = app;
-    this._originRequest = request;
-    this._originResponse = response;
-    this._isSent = false;
-    this._code = 0;
-    this._duration = Date.now(); // duration of each request
     this.__initParse();
   }
-  $$freeListFree() {
-    if (this.__parseState !== 2) {
-      this._app.logger.serror('context', '$$freeListFree: request __parseState unexpected');
-    }
-    if (this._cookie) {
-      this._app._CookieStoreFreeList.free(this._cookie);
-      this._cookie = null;
-    }
+
+  destroy() {
     if (this._store) {
       this._store.clear();
     }
+    this._cookie = null;
     this._app = null;
     this._originRequest = null;
     this._originResponse = null;
-    this._type = 'application/json; charset=utf-8';
     this._body = null;
     this._uid = null;
     this._urole = null;
@@ -65,11 +46,6 @@ class SilenceContext {
     this._query = null;
     this._post = null;
     this._multipart = null;
-    this.__parseState = 0;
-    this.__parseBytes = 0;
-    this.__parseTime = 0;
-    this.__parseRate = 0;
-    this.__parseLimit = 0;
     this.__parseOnData = null;
     this.__parseOnEnd = null;
   }
@@ -200,11 +176,11 @@ class SilenceContext {
   get ENV() {
     return this._app.ENV;
   }
-  get duration() {
-    return Date.now() - this._duration;
-  }
   get method() {
     return this._originRequest.method;
+  }
+  get duration() {
+    return 0; // 新版本不再记录 duration，依靠 nginx 来记录 access 日志
   }
   get ip() {
     return this.util.getClientIp(this._originRequest) || util.getRemoteIp(this._originRequest);
@@ -235,7 +211,7 @@ class SilenceContext {
   }
   get cookie() {
     if (this._cookie === null) {
-      this._cookie = this._app._CookieStoreFreeList.alloc(this);
+      this._cookie = new this._app._CookieStoreClass(this);
     }
     return this._cookie;
   }
@@ -306,6 +282,7 @@ class SilenceContext {
   setHeader(key, val) {
     this._originResponse.setHeader(key, val);
   }
+
   _send(code, data) {
     if (this._isSent) {
       this.logger.serror('context', new Error('send body multi times'));
@@ -321,6 +298,9 @@ class SilenceContext {
     this._isSent = true;
   }
   finallySend() {
+    if (this._finalSent) {
+      return;
+    }
     let hc = this._code === 0 || this._code >= 1000 ? 200 : this._code;
     if (this._body) {
       this._originResponse.setHeader('Content-Type', this._type);

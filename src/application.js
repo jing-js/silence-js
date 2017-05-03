@@ -3,7 +3,6 @@
 const util = require('silence-js-util');
 const SilenceContext = require('./context');
 const cluster = require('cluster');
-const FreeList = util.FreeList;
 const RouteManager = require('./route');
 const CookieStore = require('./cookie');
 const DEFAULT_PORT = 80;
@@ -29,9 +28,9 @@ class SilenceApplication {
     this._noAccessLog = config.noAccessLog !== false;
     this.ENV = config.ENV || {};
     this._route = config.router ? config.router : new RouteManager(config.logger);
-    this._CookieStoreFreeList = new FreeList(config.CookieStoreClass || CookieStore, config.freeListSize);
-    this._ContextFreeList = new FreeList(config.ContextClass || SilenceContext, config.freeListSize);
-    
+    this._CookieStoreClass = config.CookieStoreClass || CookieStore;
+    this._ContextClass = config.ContextClass || SilenceContext;
+
     this.__cleanup = false;
 
     process.on('uncaughtException', err => {
@@ -69,10 +68,6 @@ class SilenceApplication {
 
   __collectStatus() {
     return {
-      freeList: {
-        context: this._ContextFreeList.__collectStatus(),
-        cookie: this._CookieStoreFreeList.__collectStatus()
-      },
       db: this.db ? this.db.__collectStatus() : null,
       logger: this.logger.__collectStatus(),
       session: this.session ? this.session.__collectStatus() : null
@@ -137,7 +132,7 @@ class SilenceApplication {
       return;
     }
 
-    let ctx = this._ContextFreeList.alloc(this, request, response);
+    let ctx = new this._ContextClass(this, request, response);
     let app = this;
     let __final = false;
     try {
@@ -185,7 +180,8 @@ class SilenceApplication {
       try {
         ctx.finallySend();
         app._noAccessLog === false && app.logger.access(ctx.method, ctx._code, ctx.duration, request.headers['content-length'] || 0, ctx._body ? ctx._body.length : 0, ctx.accessId, util.getClientIp(request), util.getRemoteIp(request), request.headers['user-agent'], request.url);
-        app._ContextFreeList.free(ctx);
+        ctx.destroy();
+        ctx = null;
       } catch(ex) {
         // ignore almost impossible exception
         app.logger.serror('app', ex);
